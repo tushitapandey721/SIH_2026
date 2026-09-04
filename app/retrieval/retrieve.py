@@ -32,7 +32,11 @@ BM25_CACHE_FILENAME = "bm25_cache.pkl.gz"
 
 
 def get_device() -> str:
-    """Detects available hardware acceleration (CUDA vs CPU)."""
+    """Detects available hardware acceleration (CUDA vs CPU).
+    Falls back to CPU if running in Hugging Face ZeroGPU or if FORCE_CPU is enabled.
+    """
+    if os.getenv("SPACES_ZERO_GPU") == "true" or os.getenv("FORCE_CPU") == "1":
+        return "cpu"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return device
 
@@ -127,14 +131,33 @@ class LegalRetriever:
             except Exception as e:
                 print(f"[BM25 Cache] Failed to load cache ({e}). Rebuilding from Qdrant...")
 
+        # Ensure collection exists; if missing, trigger automated corpus ingestion
+        try:
+            existing_collections = [c.name for c in self.client.get_collections().collections]
+        except Exception:
+            existing_collections = []
+
+        if self.collection_name not in existing_collections:
+            print(f"[Qdrant] Collection '{self.collection_name}' not found. Triggering automated corpus ingestion...")
+            try:
+                from app.retrieval.store import ingest_all
+                ingest_all()
+            except Exception as e:
+                print(f"[Qdrant] Ingestion warning: {e}")
+
         # Rebuild from Qdrant scroll
         t0 = time.perf_counter()
-        points, _ = self.client.scroll(
-            collection_name=self.collection_name,
-            limit=5000,
-            with_payload=True,
-            with_vectors=False,
-        )
+        try:
+            points, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=5000,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except Exception as e:
+            print(f"[Qdrant] Could not scroll collection '{self.collection_name}': {e}")
+            points = []
+
         self.bm25_index = BM25Index()
         self.bm25_index.build_from_qdrant_points(points)
         build_ms = (time.perf_counter() - t0) * 1000

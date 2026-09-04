@@ -52,12 +52,9 @@ data/feedback_log.csv
 qdrant_data/
 *.pkl.gz
 
-# Large Corpus PDFs (keep directory structure via .gitkeep)
-/data/corpus/*.pdf
-/data/corpus/**/*.pdf
-!/data/corpus/**/.gitkeep
-
-# Ensure manifest and statutory sidecars are tracked
+# Corpus Documents & Manifest (Tracked for standalone deployment and PDF viewer)
+!/data/corpus/
+!/data/corpus/**
 !data/manifest.csv
 !data/sidecars/
 

@@ -134,9 +134,10 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
   },
 ];
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 /**
- * Resolves the primary official PDF URL for a statutory/treaty citation.
- * Ensures clicking on any citation opens the exact official PDF document.
+ * Resolves the statutory source PDF file URL to view official Act / Treaty documents.
  */
 function getCitationPdfUrl(cit: Citation): string {
   if (cit.pdf_url && cit.pdf_url.trim()) return cit.pdf_url;
@@ -181,7 +182,7 @@ function getCitationPdfUrl(cit: Citation): string {
     filename = "Patents Act, 1970.pdf";
   }
 
-  return `http://localhost:8000/pdf/${encodeURIComponent(filename)}`;
+  return `${API_BASE_URL}/pdf/${encodeURIComponent(filename)}`;
 }
 
 export default function Home() {
@@ -241,7 +242,7 @@ export default function Home() {
     }
 
     try {
-      await fetch("http://localhost:8000/feedback", {
+      await fetch(`${API_BASE_URL}/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -267,7 +268,7 @@ export default function Home() {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch("http://localhost:8000/conversations");
+      const res = await fetch(`${API_BASE_URL}/conversations`);
       if (res.ok) {
         const data = await res.json();
         setConversationsList(data.conversations || []);
@@ -279,7 +280,7 @@ export default function Home() {
 
   // Load dynamic corpus provenance and past conversations from backend
   useEffect(() => {
-    fetch("http://localhost:8000/corpus")
+    fetch(`${API_BASE_URL}/corpus`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) setCorpusData(data);
@@ -292,7 +293,7 @@ export default function Home() {
   const loadConversation = async (convId: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/conversations/${convId}`);
+      const res = await fetch(`${API_BASE_URL}/conversations/${convId}`);
       if (res.ok) {
         const data = await res.json();
         setConversationId(data.id);
@@ -310,7 +311,7 @@ export default function Home() {
   const deleteConversation = async (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      const res = await fetch(`http://localhost:8000/conversations/${convId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}/conversations/${convId}`, { method: "DELETE" });
       if (res.ok) {
         setConversationsList((prev) => prev.filter((c) => c.id !== convId));
         if (conversationId === convId) {
@@ -364,7 +365,7 @@ export default function Home() {
 
     try {
       // Stream real backend pipeline stages and token deltas using SSE
-      const response = await fetch("http://localhost:8000/ask/stream", {
+      const response = await fetch(`${API_BASE_URL}/ask/stream`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -517,7 +518,7 @@ export default function Home() {
       }
     } catch (err: any) {
       console.error("Backend request error:", err);
-      setBackendError(err.message || "Unable to reach http://localhost:8000");
+      setBackendError(err.message || `Unable to reach backend at ${API_BASE_URL}`);
       const errorMsg: Message = {
         id: Date.now().toString(),
         role: "assistant",
@@ -673,7 +674,7 @@ export default function Home() {
           </button>
 
           <a
-            href="http://localhost:8000/admin/audit/view"
+            href={`${API_BASE_URL}/admin/audit/view`}
             target="_blank"
             rel="noopener noreferrer"
             className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#181410] hover:bg-stone-900 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all shadow-sm"
@@ -1366,7 +1367,7 @@ export default function Home() {
                       <span>Prefix: {doc.citation_prefix}</span>
                       <div className="flex items-center gap-3">
                         <a
-                          href={doc.pdf_url || `http://localhost:8000/pdf/${encodeURIComponent(doc.pdf_filename || doc.title)}`}
+                          href={doc.pdf_url || `${API_BASE_URL}/pdf/${encodeURIComponent(doc.pdf_filename || doc.title)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-amber-300 hover:text-white font-medium underline underline-offset-2"
@@ -1422,7 +1423,7 @@ export default function Home() {
                       <span>Prefix: {doc.citation_prefix}</span>
                       <div className="flex items-center gap-3">
                         <a
-                          href={doc.pdf_url || `http://localhost:8000/pdf/${encodeURIComponent(doc.pdf_filename || doc.title)}`}
+                          href={doc.pdf_url || `${API_BASE_URL}/pdf/${encodeURIComponent(doc.pdf_filename || doc.title)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-amber-300 hover:text-white font-medium underline underline-offset-2"

@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -75,12 +76,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": detail},
     )
 
-# Enable CORS for frontend development
-origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "*",
-]
+# Enable CORS for frontend and API clients
+cors_env = os.getenv("CORS_ORIGINS")
+if cors_env:
+    origins = [orig.strip() for orig in cors_env.split(",") if orig.strip()]
+else:
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "*",
+    ]
 
 app.add_middleware(
     CORSMiddleware,

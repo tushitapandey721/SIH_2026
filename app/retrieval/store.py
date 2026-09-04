@@ -33,7 +33,11 @@ SIDECARS_DIR = PROJECT_ROOT / "data" / "sidecars"
 
 
 def get_device() -> str:
-    """Detects available hardware acceleration (CUDA vs CPU)."""
+    """Detects available hardware acceleration (CUDA vs CPU).
+    Falls back to CPU if running in Hugging Face ZeroGPU or if FORCE_CPU is enabled.
+    """
+    if os.getenv("SPACES_ZERO_GPU") == "true" or os.getenv("FORCE_CPU") == "1":
+        return "cpu"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return device
 
