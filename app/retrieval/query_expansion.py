@@ -49,12 +49,12 @@ LEGAL_CONCEPT_EXPANSIONS = [
         "Section 3(e) substance obtained by admixture aggregation of properties not patentable",
     ),
     (
-        re.compile(r"(?i)\b(traditional\s+(?:knowledge|herbal\s+remedy|medicinal\s+knowledge)|botanical\s+knowledge|classical\s+ayurvedic\s+(?:formulation|remedy|medicine)|known\s+ayurvedic|old\s+ayurvedic|unmodified\s+(?:classical|ayurvedic|herbal)|exclude\s+traditional\s+medicinal|known\s+properties\s+of\s+(?:traditionally|ayurvedic|plants?))\b"),
-        "Section 3(p) Patents Act traditional knowledge not patentable aggregation duplication known properties traditionally known component",
+        re.compile(r"(?i)\b(traditional\s+(?:knowledge|herbal|medicinal|remedy|medicine|formulation|recipe|practice)|botanical\s+knowledge|classical(?:\s+\w+){0,4}\s+(?:formulation|remedy|medicine|drug|preparation|churna|rasayana|oil|recipe|taila|avaleha|kwatha|ghrita|ayurvedic)|ayurvedic(?:\s+\w+){0,4}\s+(?:formulation|remedy|medicine|recipe|preparation|polyherbal)|polyherbal(?:\s+\w+){0,4}\s+(?:formulation|composition|mixture|medicine|preparation|remedy)|known\s+ayurvedic|old\s+ayurvedic|unmodified\s+(?:classical|ayurvedic|herbal)|exclude\s+traditional\s+medicinal|known\s+properties\s+of\s+(?:traditionally|ayurvedic|plants?)|triphala|chyawanprash|churna|ghrita|taila|asava|arishta|bhasma|rasayana|grandmother|ancestral\s+recipe|family\s+recipe)\b"),
+        "Section 3(p) Section 3(e) Patents Act traditional knowledge not patentable aggregation duplication known properties traditionally known component mere admixture",
     ),
     (
-        re.compile(r"(?i)\b(prohibit(?:s|ed|ing|ion)?|banned|forbidden|not\s+patentable|excluded\s+from\s+patentability)\b"),
-        "not patentable Section 3 excluded from patentability traditional knowledge known properties",
+        re.compile(r"(?i)\b(prohibit(?:s|ed|ing|ion)?|banned|forbidden|not\s+patentable|excluded\s+from\s+patentability|inventions\s+not\s+patentable|what\s+are\s+not\s+inventions)\b"),
+        "Section 3 Patents Act not patentable excluded from patentability traditional knowledge known properties mere admixture",
     ),
 
     # 3. AYUSH Drug Licensing & Labelling (D&C Act & Rules)

@@ -281,9 +281,12 @@ def chunk_document(
                     if is_sec2:
                         clause_id = f"{parent_base}(1)({clause_letter})" + (f' "{term}"' if term else "")
                         header_prefix = f"{sec_id}\n(1) In this Act, unless the context otherwise requires,—\n"
-                    else:
+                    elif "not patentable" in sec_id.lower() or "not patentable" in sec_text.lower() or ("section 3" in sec_id.lower() and "invention" in sec_text.lower()):
                         clause_id = f"{parent_base}({clause_letter})"
                         header_prefix = f"{sec_id}\nThe following are not inventions within the meaning of this Act,—\n"
+                    else:
+                        clause_id = f"{parent_base}({clause_letter})"
+                        header_prefix = f"{sec_id}\n"
 
                     full_clause_text = f"{header_prefix}{clause_text}".strip()
 

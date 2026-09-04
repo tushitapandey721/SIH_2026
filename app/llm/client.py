@@ -36,42 +36,62 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "429" in err_str or "rate limit" in err_str or "rate_limit" in err_str or "tpm" in err_str or "rpm" in err_str
 
 
+GROQ_CANDIDATE_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+]
+
+
 def _call_groq(
     system_prompt: str,
     user_prompt: str,
     max_tokens: int = 1024,
     model: Optional[str] = None,
 ) -> str:
-    """Invokes the Groq API for chat completion with max_retries=0 for immediate 429 failover."""
+    """Invokes the Groq API for chat completion with max_retries=0 and candidate failover."""
     import groq
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key or api_key.strip() in ("", "gsk_your_groq_api_key_here"):
         raise ValueError("GROQ_API_KEY is not set or contains default placeholder.")
 
-    model_name = model or DEFAULT_GROQ_MODEL
     # max_retries=0 disables internal exponential backoff so 429 raises immediately
     client = groq.Groq(api_key=api_key, max_retries=0)
+    
+    primary = model or DEFAULT_GROQ_MODEL
+    models_to_try = [primary] + [m for m in GROQ_CANDIDATE_MODELS if m != primary]
 
-    extra_params = {}
-    if "gpt-oss" in model_name.lower():
-        extra_params["reasoning_effort"] = "low"
+    last_err = None
+    for model_name in models_to_try:
+        try:
+            extra_params = {}
+            if "gpt-oss" in model_name.lower():
+                extra_params["reasoning_effort"] = "low"
 
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_tokens=max_tokens,
-        **extra_params,
-    )
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=max_tokens,
+                **extra_params,
+            )
 
-    if not response.choices:
-        raise ValueError("Groq returned empty choices.")
+            if response.choices:
+                content = response.choices[0].message.content
+                return str(content).strip() if content is not None else ""
+        except Exception as e:
+            last_err = e
+            if _is_rate_limit_error(e):
+                logger.warning(f"[Groq Model Failover] 429 on {model_name}, trying next candidate model...")
+                continue
+            raise e
 
-    content = response.choices[0].message.content
-    return str(content).strip() if content is not None else ""
+    if last_err:
+        raise last_err
+    raise RuntimeError("All Groq candidate models failed.")
 
 
 def _call_mistral(
@@ -127,20 +147,7 @@ def get_completion(
     groq_model: str = "openai/gpt-oss-120b",
     mistral_model: str = "Mistral Small 4",
 ) -> Dict[str, str]:
-    """Retrieves completion by first attempting Groq with max_retries=0 and immediately falling back to Mistral.
-
-    Args:
-        system_prompt: The system instruction / context.
-        user_prompt: The user query or prompt.
-        max_tokens: Maximum tokens in response.
-        groq_model: Primary model identifier for Groq.
-        mistral_model: Fallback model identifier for Mistral.
-
-    Returns:
-        Dict with keys:
-            - 'text': The generated completion text.
-            - 'provider_used': 'groq' | 'mistral'
-    """
+    """Retrieves completion by first attempting Groq with candidate fallback and immediately falling back to Mistral."""
     # 1. Attempt Groq
     try:
         text = _call_groq(
@@ -149,7 +156,7 @@ def get_completion(
             max_tokens=max_tokens,
             model=groq_model,
         )
-        msg = f"[LLM Provider] Served by Groq (model: {groq_model})"
+        msg = f"[LLM Provider] Served by Groq"
         logger.info(msg)
         print(msg)
         return {
@@ -157,39 +164,9 @@ def get_completion(
             "provider_used": "groq",
         }
     except Exception as groq_err:
-        if _is_rate_limit_error(groq_err):
-            # Check if error specifies a short retry window (e.g. 10s TPM burst)
-            m = re.search(r"try again in (\d+\.?\d*)s", str(groq_err))
-            wait_s = float(m.group(1)) if m else 3.0
-            if wait_s <= 15.0:
-                retry_log = f"[RATE LIMIT RETRY] Groq 429 TPM burst: waiting {wait_s:.1f}s before retry..."
-                logger.warning(retry_log)
-                print(retry_log)
-                time.sleep(wait_s + 0.5)
-                try:
-                    text = _call_groq(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        max_tokens=max_tokens,
-                        model=groq_model,
-                    )
-                    return {
-                        "text": text,
-                        "provider_used": "groq",
-                    }
-                except Exception as retry_err:
-                    groq_err = retry_err
-
-            rate_limit_msg = (
-                f"[RATE LIMIT FALLBACK] Groq 429 RateLimitError (TPM/RPM quota reached on free-tier: {groq_err}). "
-                f"Failing over to Mistral ({mistral_model})..."
-            )
-            logger.warning(rate_limit_msg)
-            print(rate_limit_msg)
-        else:
-            warn_msg = f"[LLM Provider] Groq call failed ({groq_err}). Falling back to Mistral ({mistral_model})..."
-            logger.warning(warn_msg)
-            print(warn_msg)
+        warn_msg = f"[LLM Provider] Groq calls failed ({groq_err}). Falling back to Mistral ({mistral_model})..."
+        logger.warning(warn_msg)
+        print(warn_msg)
 
     # 2. Fallback to Mistral
     try:
@@ -220,7 +197,7 @@ def stream_completion(
     groq_model: str = "openai/gpt-oss-120b",
     mistral_model: str = "Mistral Small 4",
 ):
-    """Streams completion chunks from Groq (primary, max_retries=0) or Mistral (fallback).
+    """Streams completion chunks across Groq candidate models and Mistral fallback.
 
     Yields:
         Dict with keys:
@@ -231,41 +208,40 @@ def stream_completion(
 
     api_key = os.getenv("GROQ_API_KEY")
     if api_key and api_key.strip() not in ("", "gsk_your_groq_api_key_here"):
-        try:
-            # max_retries=0 disables internal exponential backoff so 429 raises immediately
-            client = groq.Groq(api_key=api_key, max_retries=0)
-            model_name = groq_model or DEFAULT_GROQ_MODEL
-            extra_params = {}
-            if "gpt-oss" in model_name.lower():
-                extra_params["reasoning_effort"] = "low"
+        client = groq.Groq(api_key=api_key, max_retries=0)
+        primary = groq_model or DEFAULT_GROQ_MODEL
+        models_to_try = [primary] + [m for m in GROQ_CANDIDATE_MODELS if m != primary]
 
-            stream = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=max_tokens,
-                stream=True,
-                **extra_params,
-            )
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content if chunk.choices else None
-                if delta:
-                    yield {"delta": delta, "provider": "groq"}
-            return
-        except Exception as e:
-            if _is_rate_limit_error(e):
-                rate_msg = (
-                    f"[RATE LIMIT FALLBACK] Groq 429 RateLimitError during streaming (TPM/RPM quota reached). "
-                    f"ZERO backoff wait — immediately switching stream to Mistral ({mistral_model})..."
+        for model_name in models_to_try:
+            try:
+                extra_params = {}
+                if "gpt-oss" in model_name.lower():
+                    extra_params["reasoning_effort"] = "low"
+
+                stream = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=max_tokens,
+                    stream=True,
+                    **extra_params,
                 )
-                logger.warning(rate_msg)
-                print(rate_msg)
-            else:
-                warn_msg = f"[LLM Provider] Groq streaming failed ({e}), falling back to Mistral ({mistral_model})..."
-                logger.warning(warn_msg)
-                print(warn_msg)
+                yielded_any = False
+                for chunk in stream:
+                    delta = chunk.choices[0].delta.content if chunk.choices else None
+                    if delta:
+                        yielded_any = True
+                        yield {"delta": delta, "provider": "groq"}
+                if yielded_any:
+                    return
+            except Exception as e:
+                if _is_rate_limit_error(e):
+                    logger.warning(f"[Groq Stream Failover] 429 on {model_name}, trying next model...")
+                    continue
+                logger.warning(f"[Groq Stream Error] {e}")
+                break
 
     # Fallback to Mistral
     try:
@@ -294,5 +270,6 @@ def stream_completion(
         except Exception as e:
             logger.error(f"Mistral streaming failed: {e}")
             raise RuntimeError(f"Both LLM streaming providers failed: {e}")
+
 
 

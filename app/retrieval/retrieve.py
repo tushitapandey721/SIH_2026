@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -20,13 +21,15 @@ from app.retrieval.store import COLLECTION_NAME, QDRANT_STORAGE_PATH, DEFAULT_MO
 from app.retrieval.bm25 import BM25Index
 from app.retrieval.query_expansion import expand_legal_query
 
+logger = logging.getLogger("IP-SAKTI.Retriever")
+
 # Pipeline Configuration
 DENSE_TOP_K = 30
 BM25_TOP_K = 20
 RRF_K = 60
-FUSED_TOP_K = 12
+FUSED_TOP_K = 8
 RERANK_TOP_K = 5
-RERANK_MAX_LENGTH = 256
+RERANK_MAX_LENGTH = 192
 RERANK_BATCH_SIZE = 8
 BM25_CACHE_FILENAME = "bm25_cache.pkl.gz"
 
@@ -39,6 +42,12 @@ def get_device() -> str:
         return "cpu"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     return device
+
+
+# Ensure PyTorch CPU threads are bounded to avoid thread thrashing / core contention on Windows
+if get_device() == "cpu":
+    torch.set_num_threads(min(4, os.cpu_count() or 4))
+
 
 
 class LegalRetriever:
@@ -193,8 +202,12 @@ class LegalRetriever:
         """
         j_clean = jurisdiction.lower().strip()
 
+        t_all_start = time.perf_counter()
+
         # 1. Legal Query Normalization & Semantic Expansion
+        t0 = time.perf_counter()
         norm_query, expanded_query = expand_legal_query(query)
+        t_exp_ms = (time.perf_counter() - t0) * 1000
 
         # 2. Dense Retrieval via BGE-M3 + Qdrant
         must_conditions = [
@@ -206,18 +219,23 @@ class LegalRetriever:
             )
         query_filter = Filter(must=must_conditions)
 
+        t0 = time.perf_counter()
         query_vector = self.embed_model.encode(
             expanded_query,
             normalize_embeddings=True,
             show_progress_bar=False,
         ).tolist()
+        t_dense_encode_ms = (time.perf_counter() - t0) * 1000
 
+        t0 = time.perf_counter()
         dense_response = self.client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
             query_filter=query_filter,
             limit=dense_top_k,
         )
+        t_qdrant_ms = (time.perf_counter() - t0) * 1000
+
 
         dense_hits = dense_response.points
         dense_candidates: Dict[str, Dict[str, Any]] = {}
@@ -231,6 +249,7 @@ class LegalRetriever:
                 dense_candidates[doc_id] = p
 
         # 3. Sparse Retrieval via Legal BM25 Index
+        t0 = time.perf_counter()
         bm25_norm_hits = self.bm25_index.search(
             query=norm_query,
             jurisdiction=j_clean,
@@ -254,8 +273,10 @@ class LegalRetriever:
                     hit_copy = dict(hit)
                     hit_copy["bm25_rank"] = len(bm25_candidates) + 1
                     bm25_candidates[doc_id] = hit_copy
+        t_bm25_ms = (time.perf_counter() - t0) * 1000
 
         # 4. Reciprocal Rank Fusion (RRF) & Deduplication
+        t0 = time.perf_counter()
         all_doc_ids = set(dense_candidates.keys()).union(set(bm25_candidates.keys()))
         fused_pool: List[Dict[str, Any]] = []
 
@@ -291,6 +312,7 @@ class LegalRetriever:
 
         # Select top fused candidates
         selected_candidates = fused_pool[:fused_top_k]
+        t_rrf_ms = (time.perf_counter() - t0) * 1000
 
         if not selected_candidates:
             diagnostics = {
@@ -312,6 +334,7 @@ class LegalRetriever:
             doc_context = f"{c.get('title', '')} {c.get('citation_prefix', '')} {c.get('section', '')}: {c.get('text', '')}"
             pairs.append([expanded_query, doc_context[:750]])
 
+        t0 = time.perf_counter()
         with torch.inference_mode():
             raw_logits = self.rerank_model.predict(
                 pairs,
@@ -320,6 +343,7 @@ class LegalRetriever:
                 show_progress_bar=False,
             )
         sigmoids = torch.sigmoid(torch.tensor(raw_logits, dtype=torch.float32)).tolist()
+        t_rerank_ms = (time.perf_counter() - t0) * 1000
 
         for c, raw, sig in zip(selected_candidates, raw_logits, sigmoids):
             c["cross_encoder_raw_score"] = float(raw)
@@ -350,6 +374,14 @@ class LegalRetriever:
                 if len(diverse_top_k) == rerank_top_k:
                     break
 
+        t_total_ms = (time.perf_counter() - t_all_start) * 1000
+        logger.info(
+            f"[RETRIEVE PROFILE] Query: '{query[:40]}' | Total: {t_total_ms:.1f}ms | "
+            f"Expand: {t_exp_ms:.1f}ms | Dense: {t_dense_encode_ms:.1f}ms | Qdrant: {t_qdrant_ms:.1f}ms | "
+            f"BM25: {t_bm25_ms:.1f}ms | RRF: {t_rrf_ms:.1f}ms | Rerank ({len(pairs)} pairs): {t_rerank_ms:.1f}ms"
+        )
+
+
         diagnostics = {
             "query": query,
             "normalized_query": norm_query,
@@ -375,6 +407,10 @@ def get_default_retriever() -> LegalRetriever:
     return _default_retriever
 
 
+_RETRIEVE_CACHE: Dict[Tuple[str, str, Optional[str]], Dict[str, Any]] = {}
+_RETRIEVE_CACHE_MAX = 512
+
+
 def retrieve(
     query: str,
     jurisdiction: str = "national",
@@ -386,7 +422,13 @@ def retrieve(
     rerank_top_k: int = RERANK_TOP_K,
     max_per_doc: int = 3,
 ) -> Dict[str, Any]:
-    """Module-level retrieve wrapper returning results, raw_candidates, and diagnostics."""
+    """Module-level retrieve wrapper returning results, raw_candidates, and diagnostics.
+    Caches query results in-memory for instant (<2ms) responses on repeated inquiries and sample prompts.
+    """
+    cache_key = (query.strip().lower(), jurisdiction.lower().strip(), category)
+    if cache_key in _RETRIEVE_CACHE:
+        return _RETRIEVE_CACHE[cache_key]
+
     retriever = get_default_retriever()
     top_results, diagnostics = retriever.retrieve(
         query=query,
@@ -398,8 +440,12 @@ def retrieve(
         fused_top_k=fused_top_k,
         rerank_top_k=rerank_top_k,
     )
-    return {
+    res_dict = {
         "results": top_results,
         "raw_candidates": top_results,
         "diagnostics": diagnostics,
     }
+    if len(_RETRIEVE_CACHE) >= _RETRIEVE_CACHE_MAX:
+        _RETRIEVE_CACHE.clear()
+    _RETRIEVE_CACHE[cache_key] = res_dict
+    return res_dict

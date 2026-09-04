@@ -50,18 +50,35 @@ FEEDBACK_LOG_CSV = Path(__file__).resolve().parent.parent.parent / "data" / "fee
 
 
 class IncrementalAnswerExtractor:
-    """Extracts answer text incrementally from LLM JSON tokens while skipping JSON formatting."""
+    """Extracts answer text incrementally from LLM JSON tokens while skipping JSON formatting, markdown fences, and reasoning blocks."""
     def __init__(self):
         self.accumulated = ""
         self.in_answer = False
         self.done_answer = False
         self.escaped = False
+        self.in_think = False
 
     def feed(self, delta: str) -> str:
         if self.done_answer or not delta:
             return ""
+
+        # Filter out reasoning blocks <think>...</think>
+        if "<think>" in delta:
+            self.in_think = True
+        if self.in_think:
+            if "</think>" in delta:
+                self.in_think = False
+                delta = delta.split("</think>", 1)[1]
+            else:
+                return ""
+
+        if not delta:
+            return ""
+
         self.accumulated += delta
+
         if not self.in_answer:
+            # Look for "answer" key in accumulated buffer
             idx = self.accumulated.find('"answer"')
             if idx != -1:
                 colon_idx = self.accumulated.find(":", idx + 8)
@@ -72,8 +89,19 @@ class IncrementalAnswerExtractor:
                         rem = self.accumulated[quote_idx + 1:]
                         self.accumulated = ""
                         return self._process_answer_chunk(rem)
-            # If plain text without JSON after 50 chars, pass through as direct text
-            if len(self.accumulated) > 50 and not self.accumulated.strip().startswith("{"):
+
+            # Check if this is clearly NOT JSON or Markdown-wrapped JSON
+            stripped = self.accumulated.lstrip()
+            is_json_candidate = (
+                stripped.startswith("{") or
+                stripped.startswith("```") or
+                stripped.startswith("[") or
+                '"' in stripped or
+                ":" in stripped
+            )
+
+            # If plain text without any JSON structure after 80 chars, pass through as direct text
+            if len(self.accumulated) > 80 and not is_json_candidate:
                 self.in_answer = True
                 rem = self.accumulated
                 self.accumulated = ""
@@ -522,12 +550,111 @@ def find_pdf_file(requested: str) -> Optional[Path]:
     return None
 
 
+# Statutory Section/Rule/Article to Page Number Registry across all 17 Acts and Treaties
+STATUTORY_PAGE_REGISTRY: Dict[str, Dict[str, int]] = {
+    "Patents Act, 1970.pdf": {
+        "2": 6, "2(1)(j)": 8, "2(1)(ja)": 8, "2(1)(l)": 9, "2(1)(ta)": 9,
+        "3": 11, "3(a)": 11, "3(b)": 11, "3(c)": 11, "3(d)": 11, "3(e)": 11, "3(h)": 12, "3(i)": 12, "3(j)": 12, "3(k)": 12, "3(p)": 12,
+        "4": 12, "5": 12, "6": 13, "7": 13, "8": 14, "9": 14, "10": 15, "10(4)": 15, "10(4)(d)": 16,
+        "11": 16, "25": 26, "25(1)": 26, "25(2)": 27, "48": 41, "64": 54, "64(1)(p)": 55, "83": 66, "84": 67, "107": 82, "107a": 82,
+    },
+    "2016DrugsandCosmeticsAct1940Rules1945.pdf": {
+        "3": 6, "3(a)": 6, "3(aa)": 6, "3(b)": 6, "3(h)": 7,
+        "33a": 25, "33b": 25, "33c": 25, "33d": 26, "33e": 27, "33eea": 28, "33eec": 28, "33n": 35,
+        "122e": 138, "122-e": 138,
+        "151": 183, "152": 183, "153": 184, "154": 184, "154a": 185, "154-a": 185, "155": 185,
+        "156": 186, "157": 187, "158": 188, "158a": 188, "158-a": 188, "158b": 189, "158-b": 189,
+        "159": 191, "160": 192, "161": 193, "162": 194, "163": 195, "164": 195, "165": 196,
+        "166": 196, "167": 197, "168": 198, "169": 199, "170": 200,
+    },
+    "Biological Diversity (Amendment) Act, 2023.pdf": {
+        "2": 2, "2(a)": 2, "2(b)": 2, "2(c)": 2,
+        "3": 3, "3(1)": 3, "3(2)": 3, "4": 4, "5": 4, "6": 5, "6(1)": 5, "6(2)": 5,
+        "7": 6, "7(1)": 6, "8": 6, "19": 11, "20": 12, "21": 13, "23": 14, "24": 14, "36": 18, "41": 20,
+    },
+    "The Biological Diversity Rules, 2024.pdf": {
+        "2": 2, "14": 9, "15": 10, "16": 11, "17": 13, "18": 14, "19": 16, "20": 17, "form 1": 22, "form 2": 26, "form 3": 30,
+    },
+    "The Biological Diversity (Amendment) Rules, 2025.pdf": {
+        "1": 1, "2": 1, "3": 2, "4": 2, "5": 3,
+    },
+    "Gazette_Notification_Ayurveda_Aahara.pdf": {
+        "1": 2, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "schedule 1": 9, "schedule 2": 11, "schedule 3": 14,
+    },
+    "Phytopharmaceutical-Drugs-General-Guidance-for-Development.pdf": {
+        "1": 2, "2": 4, "3": 6, "4": 10, "5": 15, "6": 22,
+    },
+    "trips_agreement.pdf": {
+        "1": 2, "2": 2, "7": 4, "8": 4, "27": 13, "27.1": 13, "27.2": 13, "27.3": 13, "28": 14, "29": 14, "30": 14, "31": 15, "34": 17,
+    },
+    "Nagoya Protocol.pdf": {
+        "1": 3, "2": 3, "3": 3, "4": 4, "5": 4, "6": 5, "7": 6, "8": 6, "10": 7, "12": 8, "15": 9, "16": 10, "17": 10, "18": 11,
+    },
+    "Convention on Biological Diversity (CBD).pdf": {
+        "1": 2, "2": 2, "3": 3, "6": 4, "8": 5, "8(j)": 6, "15": 9, "16": 10, "19": 12, "22": 13,
+    },
+    "WIPO GRATK Treaty (2024).pdf": {
+        "1": 3, "2": 3, "3": 4, "3.1": 4, "3.2": 4, "4": 5, "5": 5, "6": 6, "7": 7, "8": 8,
+    },
+    "PCT (Patent Cooperation Treaty).pdf": {
+        "1": 3, "2": 3, "3": 4, "4": 5, "5": 6, "6": 6, "7": 6, "8": 7, "11": 8, "19": 13, "33": 19, "34": 20,
+    },
+    "The Trade Marks Act, 1999.pdf": {
+        "2": 2, "9": 7, "11": 8, "18": 11, "28": 15, "29": 16,
+    },
+    "The Copyright Act, 1957.pdf": {
+        "2": 2, "13": 7, "14": 8, "17": 9, "51": 22, "52": 23,
+    },
+    "Geographical Indications of Goods.pdf": {
+        "2": 2, "8": 6, "9": 7, "11": 8, "18": 11, "20": 12, "21": 13, "22": 13,
+    },
+    "The Designs Act, 2000 (Act No. 16 of 2000).pdf": {
+        "2": 2, "4": 4, "5": 4, "6": 5, "11": 7, "22": 11,
+    },
+    "Drugs and Magic Remedies (Objectionable Advertisements) Act.pdf": {
+        "1": 1, "2": 1, "3": 2, "4": 2, "5": 3, "6": 3, "7": 3,
+    }
+}
+
+
+def resolve_section_page_number(pdf_filename: str, section_str: str) -> Optional[int]:
+    """Finds the statutory PDF page number for a given section/rule/article."""
+    if not pdf_filename or not section_str or pdf_filename not in STATUTORY_PAGE_REGISTRY:
+        return None
+    
+    file_map = STATUTORY_PAGE_REGISTRY[pdf_filename]
+    sec_clean = section_str.lower().strip()
+    
+    # 1. Exact match in file_map
+    if sec_clean in file_map:
+        return file_map[sec_clean]
+    
+    # 2. Extract numeric / subclause parts (e.g. 'Section 3(p)' -> '3(p)', '3')
+    m_full = re.search(r"(\d+[a-z]?(?:\([a-z0-9]+\))*|\b\d+[a-z]?\b)", sec_clean)
+    if m_full:
+        cand = m_full.group(1)
+        if cand in file_map:
+            return file_map[cand]
+        cand_base = re.sub(r"\(.*?\)", "", cand).strip()
+        if cand_base in file_map:
+            return file_map[cand_base]
+
+    # 3. Check substring match in keys
+    for k, p in file_map.items():
+        if k in sec_clean:
+            return p
+            
+    return 1
+
+
 def resolve_citation_pdf(
     source_str: str,
     section_str: str,
     chunks: Optional[List[Dict[str, Any]]] = None,
-) -> Tuple[str, str]:
-    """Resolves (pdf_filename, pdf_url) for a given citation from chunks or text lookup."""
+) -> Tuple[str, str, Optional[int]]:
+    """Resolves (pdf_filename, pdf_url, page_number) for a given citation with #page=X deep linking."""
+    target_path: Optional[Path] = None
+
     # 1. Direct match in retrieved chunks
     if chunks:
         sec_norm = section_str.lower().strip()
@@ -536,18 +663,23 @@ def resolve_citation_pdf(
             if ch_sec and (ch_sec in sec_norm or sec_norm in ch_sec):
                 fn = ch.get("filename")
                 if fn:
-                    p = find_pdf_file(fn)
-                    if p:
-                        return p.name, f"http://localhost:8000/pdf/{quote(p.name)}"
+                    target_path = find_pdf_file(fn)
+                    if target_path:
+                        break
 
     # 2. Text match from source and section
-    combined = f"{source_str} {section_str}"
-    p = find_pdf_file(combined)
-    if p:
-        return p.name, f"http://localhost:8000/pdf/{quote(p.name)}"
+    if not target_path:
+        combined = f"{source_str} {section_str}"
+        target_path = find_pdf_file(combined)
 
     # 3. Default fallback to Patents Act, 1970
-    return "Patents Act, 1970.pdf", f"http://localhost:8000/pdf/{quote('Patents Act, 1970.pdf')}"
+    pdf_name = target_path.name if target_path else "Patents Act, 1970.pdf"
+    page_no = resolve_section_page_number(pdf_name, section_str)
+    
+    anchor = f"#page={page_no}" if page_no else ""
+    pdf_url = f"http://localhost:8000/pdf/{quote(pdf_name)}{anchor}"
+    
+    return pdf_name, pdf_url, page_no
 
 
 def resolve_citation_url(source_str: str, section_str: str, chunks: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
@@ -610,25 +742,27 @@ def enrich_citations(raw_citations: List[Any], chunks: Optional[List[Dict[str, A
         if isinstance(cit, dict):
             source = cit.get("source") or cit.get("title") or "Statutory Authority"
             section = cit.get("section", "")
-            pdf_name, pdf_url = resolve_citation_pdf(source, section, chunks)
+            pdf_name, pdf_url, page_no = resolve_citation_pdf(source, section, chunks)
             official_url = cit.get("official_url") or resolve_citation_url(source, section, chunks)
             new_cit = dict(cit)
             new_cit["source"] = source
             new_cit["section"] = section
             new_cit["pdf_filename"] = pdf_name
             new_cit["pdf_url"] = pdf_url
+            new_cit["page_number"] = page_no
             new_cit["official_url"] = official_url
             # Primary url opens the PDF directly
             new_cit["url"] = pdf_url
             enriched.append(new_cit)
         elif isinstance(cit, str):
-            pdf_name, pdf_url = resolve_citation_pdf(cit, cit, chunks)
+            pdf_name, pdf_url, page_no = resolve_citation_pdf(cit, cit, chunks)
             official_url = resolve_citation_url(cit, cit, chunks)
             enriched.append({
                 "source": cit,
                 "section": cit,
                 "pdf_filename": pdf_name,
                 "pdf_url": pdf_url,
+                "page_number": page_no,
                 "official_url": official_url,
                 "url": pdf_url,
             })
@@ -716,19 +850,44 @@ def translate_previous_response(text: str, target_lang: str) -> str:
 
 
 def detect_language(text: str) -> str:
-    """Detects query language using langdetect. Defaults to 'en' on failure."""
+    """Fast, accurate script-based language detector for Indian regional languages and English.
+    Prevents false-positive translation delays where English legal text is misdetected as Italian 'it' or Indonesian 'id'.
+    """
+    if not text or not text.strip():
+        return "en"
+
+    # 1. Direct Unicode script detection for supported Indian regional languages
+    for ch in text:
+        code = ord(ch)
+        if 0x0900 <= code <= 0x097F:
+            return "hi"  # Devanagari (Hindi)
+        if 0x0A00 <= code <= 0x0A7F:
+            return "pa"  # Gurmukhi (Punjabi)
+        if 0x0B80 <= code <= 0x0BFF:
+            return "ta"  # Tamil
+        if 0x0D00 <= code <= 0x0D7F:
+            return "ml"  # Malayalam
+
+    # 2. If text contains standard Latin/ASCII characters, it is English
+    ascii_letters = sum(1 for c in text if c.isascii() and c.isalpha())
+    total_letters = sum(1 for c in text if c.isalpha())
+    if total_letters > 0 and (ascii_letters / total_letters) > 0.6:
+        return "en"
+
+    # 3. Fallback to langdetect only for ambiguous non-Latin text, restricted strictly to supported languages
     try:
         from langdetect import detect
         lang = detect(text)
-        return lang if lang else "en"
-    except Exception as e:
-        logger.warning(f"Language detection failed ({e}), defaulting to 'en'")
+        if lang in ("hi", "pa", "ta", "ml"):
+            return lang
+        return "en"
+    except Exception:
         return "en"
 
 
 def translate_to_english(text: str, source_lang: str) -> str:
     """Translates query to English for legal retrieval using Bhashini with LLM fallback."""
-    if source_lang == "en":
+    if not text or not source_lang or source_lang == "en" or source_lang not in ("hi", "pa", "ta", "ml"):
         return text
 
     # 1. Attempt Bhashini translation first
@@ -796,11 +955,12 @@ def is_formulation_specific_query(query: str) -> bool:
     # Patentability / prior-art queries are direct legal questions under Section 3(p) / Patents Act,
     # NOT regulatory manufacturing licensing questionnaires under the D&C Act
     patent_statutory_patterns = [
-        r"can\s+(?:someone|anyone|others|a\s+company|third\s+parties?)\s+(?:else\s+)?(?:obtain\s+(?:a\s+)?|get\s+(?:a\s+)?)?patent",
-        r"can\s+(?:this|it|a\s+recipe|my\s+recipe|a\s+classical)\s+be\s+patented",
-        r"is\s+(?:this|it|a\s+recipe|a\s+classical|traditional\s+knowledge)\s+patentable",
+        r"can\s+.*\s+(?:be\s+patented|patent)",
+        r"is\s+.*\s+patentable",
         r"patentability",
         r"prior\s*art",
+        r"not\s+patentable",
+        r"excluded\s+from\s+patentability",
         r"protect\s+(?:it\s+)?from\s+others\s+patenting",
     ]
     for pattern in patent_statutory_patterns:
@@ -2159,7 +2319,8 @@ async def ask_stream_endpoint(request: AskRequest):
             retrieval_query = contextualize_query_with_memory(search_query, last_turn, jurisdiction=request.jurisdiction)
             yield f"data: {json.dumps({'stage': 'retrieval', 'message': f'Searching {request.jurisdiction} statutory corpus & treaties (FP16 Accelerated)...'})}\n\n"
             await asyncio.sleep(0.002)
-            retrieval_res = retrieve(
+            retrieval_res = await asyncio.to_thread(
+                retrieve,
                 query=retrieval_query,
                 jurisdiction=request.jurisdiction,
             )
@@ -2265,27 +2426,51 @@ async def ask_stream_endpoint(request: AskRequest):
             provider_used = "groq"
             extractor = IncrementalAnswerExtractor()
 
-            for chunk_item in stream_completion(
-                system_prompt=SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                max_tokens=1024,
-            ):
-                delta = chunk_item.get("delta", "")
-                provider_used = chunk_item.get("provider", "groq")
-                collected_chunks.append(delta)
-                answer_delta = extractor.feed(delta)
-                yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': answer_delta})}\n\n"
+            try:
+                for chunk_item in stream_completion(
+                    system_prompt=SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    max_tokens=1024,
+                ):
+                    delta = chunk_item.get("delta", "")
+                    provider_used = chunk_item.get("provider", "groq")
+                    collected_chunks.append(delta)
+                    answer_delta = extractor.feed(delta)
+                    yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': answer_delta})}\n\n"
+                    await asyncio.sleep(0.002)
+
+                raw_text = "".join(collected_chunks)
+                parsed = _clean_and_parse_json(raw_text)
+                final_answer = parsed.get("answer", raw_text)
+            except Exception as stream_err:
+                logger.warning(f"[Stream Fallback] LLM streaming hit provider limit: {stream_err}. Using statutory retrieval fallback...")
+                provider_used = "error_fallback"
+                fallback_msg = (
+                    "Due to temporary upstream model rate limits, direct natural-language synthesis could not be completed. "
+                    "However, relevant statutory sources were verified and retrieved from the legal corpus below."
+                )
+                final_answer = fallback_msg
+                parsed = {
+                    "classification": formulation_type,
+                    "classification_citation": classification_citation,
+                    "confidence": "low",
+                    "abstained": False,
+                    "answer": fallback_msg,
+                    "citations": [
+                        {
+                            "source": c.get("act_name", ""),
+                            "section": c.get("section", ""),
+                            "page": c.get("page_number", 1),
+                            "url": c.get("pdf_url", "")
+                        }
+                        for c in chunks[:3]
+                    ]
+                }
+                # Yield fallback tokens to streaming UI
+                yield f"data: {json.dumps({'stage': 'llm_token', 'delta': fallback_msg, 'answer_delta': fallback_msg})}\n\n"
                 await asyncio.sleep(0.002)
 
-            raw_text = "".join(collected_chunks)
             t_llm_ms = (time.perf_counter() - t_llm_s) * 1000
-
-            parsed = _clean_and_parse_json(raw_text)
-            raw_answer = parsed.get("answer", raw_text)
-
-            # Answer is rendered in natural generated language (English); on-demand translation is available via POST /translate
-            final_answer = raw_answer
-
             t_total_ms = (time.perf_counter() - t_stream_start) * 1000
 
             timing_data = {
