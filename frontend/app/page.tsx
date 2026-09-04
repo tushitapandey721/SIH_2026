@@ -30,6 +30,13 @@ import {
   Plus,
   ThumbsUp,
   ThumbsDown,
+  Leaf,
+  Sprout,
+  Building2,
+  ArrowLeftRight,
+  Columns2,
+  ShieldCheck,
+  Languages,
 } from "lucide-react";
 
 interface Citation {
@@ -48,6 +55,120 @@ interface QuestionData {
   help_text?: string;
 }
 
+interface ABSResult {
+  requires_nba_approval: boolean;
+  requires_sbb_intimation: boolean;
+  applicable_provision: string;
+  exact_statutory_text?: string;
+  next_steps: string[];
+  relevant_forms: string[];
+  sbb_state?: string;
+  summary?: string;
+}
+
+interface ABSQuestionOption {
+  label: string;
+  value: boolean;
+}
+
+interface ABSQuestion {
+  id: string;
+  question: string;
+  options: ABSQuestionOption[];
+  help_text?: string;
+}
+
+interface ABSComplianceData {
+  triggered: boolean;
+  status: "needs_input" | "completed" | "not_triggered";
+  answers: Record<string, boolean>;
+  next_question?: ABSQuestion | null;
+  result?: ABSResult | null;
+}
+
+interface TKDLIpcClass {
+  code: string;
+  description: string;
+}
+
+interface TKDLHints {
+  formulation_category: string;
+  formulation_description: string;
+  therapeutic_area: string;
+  ipc_classes: TKDLIpcClass[];
+  classical_source_texts: string[];
+  search_keywords: string[];
+  is_simulated_search: boolean;
+}
+
+interface TKDLPriorArtWorkflowStep {
+  step: string;
+  detail: string;
+}
+
+interface HistoricalCaseItem {
+  title: string;
+  patent_number?: string;
+  jurisdiction?: string;
+  year_granted?: string;
+  year_revoked?: string;
+  facts?: string;
+}
+
+interface HistoricalCaseStudyData {
+  triggered: boolean;
+  title: string;
+  subtitle?: string;
+  turmeric_case: HistoricalCaseItem;
+  neem_case: HistoricalCaseItem;
+  closing_line: string;
+  source_footnote: string;
+}
+
+interface TKDLPointerData {
+  triggered: boolean;
+  title: string;
+  subtitle?: string;
+  official_portal_url: string;
+  statutory_provision: string;
+  statutory_text: string;
+  why_relevant: string;
+  access_notice: string;
+  hints: TKDLHints;
+  patent_examiner_workflow: TKDLPriorArtWorkflowStep[];
+  recommended_next_steps: string[];
+  case_study?: HistoricalCaseStudyData;
+}
+
+interface ComparisonJurisdictionResult {
+  answer: string;
+  citations: Citation[];
+  confidence: "high" | "medium" | "low" | string;
+  abstained: boolean;
+  classification?: string;
+  classification_citation?: string;
+  language?: string;
+  provider_used?: string;
+  abs_compliance?: ABSComplianceData;
+  tkdl_pointer?: TKDLPointerData;
+  timing_ms?: {
+    retrieval?: number;
+    llm?: number;
+    total?: number;
+  };
+}
+
+interface JurisdictionComparisonData {
+  query: string;
+  conversation_id: string;
+  national: ComparisonJurisdictionResult;
+  international: ComparisonJurisdictionResult;
+  shared_citations_count: number;
+  shared_sources: string[];
+  is_zero_overlap: boolean;
+  latency_ms: number;
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant" | "system";
@@ -62,9 +183,25 @@ interface Message {
   language?: string;
   provider_used?: string;
   pending_formulation_answers?: Record<string, boolean>;
+  abs_compliance?: ABSComplianceData;
+  tkdl_pointer?: TKDLPointerData;
+  case_study?: HistoricalCaseStudyData;
+  is_comparison?: boolean;
+  comparison_data?: JurisdictionComparisonData;
   timestamp: string;
   isError?: boolean;
   isStreaming?: boolean;
+  originalContent?: string;
+  activeLanguage?: string;
+  translations?: Record<string, string>;
+  isTranslating?: boolean;
+  showTranslation?: boolean;
+  activeTranslationText?: string;
+  isSimplified?: boolean;
+  simplifiedContent?: string;
+  originalFormalContent?: string;
+  isSimplifying?: boolean;
+  showSimplified?: boolean;
 }
 
 interface ConversationItem {
@@ -82,6 +219,7 @@ interface SamplePrompt {
   query: string;
   jurisdiction: "national" | "international";
   answers: Record<string, boolean>;
+  is_compare?: boolean;
 }
 
 interface CorpusDocument {
@@ -109,6 +247,25 @@ interface CorpusProvenance {
 
 const SAMPLE_PROMPTS: SamplePrompt[] = [
   {
+    title: "Compare: Traditional Knowledge Patenting",
+    query: "Can I patent traditional knowledge?",
+    jurisdiction: "national",
+    answers: {},
+    is_compare: true,
+  },
+  {
+    title: "TKDL Classical Joint Oil",
+    query: "My grandmother gave me a family recipe for a herbal joint pain oil made from classical Ayurvedic texts — can I patent it?",
+    jurisdiction: "national",
+    answers: {},
+  },
+  {
+    title: "ABS Kerala Herbal Export",
+    query: "I want to export a herbal supplement made from a plant sourced in Kerala — what approval do I need?",
+    jurisdiction: "national",
+    answers: {},
+  },
+  {
     title: "Classical Patentability",
     query: "Is a classical Ayurvedic formulation patentable under Indian Patent Law?",
     jurisdiction: "national",
@@ -133,6 +290,14 @@ const SAMPLE_PROMPTS: SamplePrompt[] = [
     answers: {},
   },
 ];
+
+const TRANSLATE_LANGUAGES = [
+  { code: "en", name: "English", native: "English", script: "Latin" },
+  { code: "hi", name: "Hindi", native: "हिन्दी", script: "Devanagari" },
+  { code: "pa", name: "Punjabi", native: "ਪੰਜਾਬੀ", script: "Gurmukhi" },
+  { code: "ml", name: "Malayalam", native: "മലയാളം", script: "Malayalam" },
+  { code: "ta", name: "Tamil", native: "தமிழ்", script: "Tamil" },
+] as const;
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -187,6 +352,7 @@ function getCitationPdfUrl(cit: Citation): string {
 
 export default function Home() {
   const [jurisdiction, setJurisdiction] = useState<"national" | "international">("national");
+  const [isCompareMode, setIsCompareMode] = useState<boolean>(false);
   const [inputQuery, setInputQuery] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -198,7 +364,33 @@ export default function Home() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [corpusData, setCorpusData] = useState<CorpusProvenance | null>(null);
   const [conversationsList, setConversationsList] = useState<ConversationItem[]>([]);
+  const [mySessionIds, setMySessionIds] = useState<string[]>([]);
+  const [historyTab, setHistoryTab] = useState<"my" | "archive">("my");
+  const heroTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ipsakti_my_sessions");
+      if (raw) {
+        setMySessionIds(JSON.parse(raw));
+      }
+    } catch (e) {
+      console.warn("Could not parse local session IDs", e);
+    }
+  }, []);
+
+  const trackMySession = (id: string) => {
+    if (!id) return;
+    setMySessionIds((prev) => {
+      if (prev.includes(id)) return prev;
+      const next = [id, ...prev];
+      try {
+        localStorage.setItem("ipsakti_my_sessions", JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
+  };
   const [backendError, setBackendError] = useState<string | null>(null);
   const [feedbackState, setFeedbackState] = useState<
     Record<
@@ -259,6 +451,175 @@ export default function Home() {
     }
   };
 
+  const [openTranslateMsgId, setOpenTranslateMsgId] = useState<string | null>(null);
+
+  const handleTranslateMessage = async (msgId: string, targetLang: string) => {
+    setOpenTranslateMsgId(null);
+    const targetMsg = messages.find((m) => m.id === msgId);
+    if (!targetMsg) return;
+
+    if (targetLang === "en") {
+      // Hide translation card to view only the original English text
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                showTranslation: false,
+                activeLanguage: "en",
+                activeTranslationText: undefined,
+              }
+            : m
+        )
+      );
+      return;
+    }
+
+    // Check client-side cached translation to avoid re-querying API
+    const cached = targetMsg.translations?.[targetLang];
+    if (cached) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                showTranslation: true,
+                activeLanguage: targetLang,
+                activeTranslationText: cached,
+              }
+            : m
+        )
+      );
+      return;
+    }
+
+    // Set local loading indicator on this specific message only
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, isTranslating: true } : m))
+    );
+
+    try {
+      const baseText = targetMsg.content;
+      const res = await fetch(`${API_BASE_URL}/translate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answer_text: baseText,
+          citations: targetMsg.citations || [],
+          target_language: targetLang,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Translation failed with HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      const translatedText = data.translated_text || baseText;
+
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId) return m;
+          const currentTranslations = m.translations || {};
+          return {
+            ...m,
+            // Keep original m.content strictly untouched!
+            showTranslation: true,
+            activeLanguage: targetLang,
+            activeTranslationText: translatedText,
+            isTranslating: false,
+            translations: {
+              ...currentTranslations,
+              [targetLang]: translatedText,
+            },
+          };
+        })
+      );
+    } catch (err) {
+      console.error("Failed to translate answer:", err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, isTranslating: false } : m))
+      );
+    }
+  };
+
+  const handleToggleSimplify = async (msgId: string) => {
+    const targetMsg = messages.find((m) => m.id === msgId);
+    if (!targetMsg) return;
+
+    // If currently showing simplified card below, toggle it off
+    if (targetMsg.showSimplified) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                showSimplified: false,
+              }
+            : m
+        )
+      );
+      return;
+    }
+
+    // If cached simplified version already exists, show it below without re-querying
+    if (targetMsg.simplifiedContent) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                showSimplified: true,
+              }
+            : m
+        )
+      );
+      return;
+    }
+
+    // Set local loading indicator on this specific message
+    setMessages((prev) =>
+      prev.map((m) => (m.id === msgId ? { ...m, isSimplifying: true } : m))
+    );
+
+    try {
+      const formalText = targetMsg.content;
+      const res = await fetch(`${API_BASE_URL}/simplify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answer_text: formalText,
+          citations: targetMsg.citations || [],
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Simplification failed with HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      const simplifiedText = data.simplified_text || data.simplified_answer || formalText;
+
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id !== msgId) return m;
+          return {
+            ...m,
+            // Keep original m.content strictly untouched!
+            showSimplified: true,
+            simplifiedContent: simplifiedText,
+            isSimplifying: false,
+          };
+        })
+      );
+    } catch (err) {
+      console.error("Failed to simplify answer:", err);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, isSimplifying: false } : m))
+      );
+    }
+  };
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -288,6 +649,15 @@ export default function Home() {
       .catch((err) => console.warn("Could not fetch corpus provenance:", err));
 
     fetchConversations();
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("view") === "history") {
+        setShowHistoryModal(true);
+      } else if (params.get("view") === "corpus") {
+        setShowCorpusModal(true);
+      }
+    }
   }, []);
 
   const loadConversation = async (convId: string) => {
@@ -297,8 +667,16 @@ export default function Home() {
       if (res.ok) {
         const data = await res.json();
         setConversationId(data.id);
+        trackMySession(data.id);
         setJurisdiction(data.jurisdiction === "international" ? "international" : "national");
-        setMessages(data.messages || []);
+        const loadedMsgs = (data.messages || []).map((m: any) => ({
+          ...m,
+          originalContent: m.originalContent || m.content,
+          activeLanguage: m.activeLanguage || "en",
+          translations: m.translations || (m.content ? { en: m.content } : {}),
+          case_study: m.case_study || m.tkdl_pointer?.case_study,
+        }));
+        setMessages(loadedMsgs);
         setShowHistoryModal(false);
       }
     } catch (err) {
@@ -314,6 +692,13 @@ export default function Home() {
       const res = await fetch(`${API_BASE_URL}/conversations/${convId}`, { method: "DELETE" });
       if (res.ok) {
         setConversationsList((prev) => prev.filter((c) => c.id !== convId));
+        setMySessionIds((prev) => {
+          const next = prev.filter((id) => id !== convId);
+          try {
+            localStorage.setItem("ipsakti_my_sessions", JSON.stringify(next));
+          } catch (_) {}
+          return next;
+        });
         if (conversationId === convId) {
           handleResetChat();
         }
@@ -322,6 +707,9 @@ export default function Home() {
       console.error("Failed to delete conversation:", err);
     }
   };
+
+  const myConversations = conversationsList.filter((c) => mySessionIds.includes(c.id));
+  const displayedConversations = historyTab === "my" ? myConversations : conversationsList;
 
   const sendQueryToBackend = async (
     query: string,
@@ -392,6 +780,9 @@ export default function Home() {
       let buffer = "";
       let currentAssistantId: string | null = null;
       let accumulatedContent = "";
+      let currentAbsCompliance: ABSComplianceData | undefined = undefined;
+      let currentTkdlPointer: TKDLPointerData | undefined = undefined;
+      let currentCaseStudy: HistoricalCaseStudyData | undefined = undefined;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -407,10 +798,44 @@ export default function Home() {
 
             if (eventJson.conversation_id && !conversationId) {
               setConversationId(eventJson.conversation_id);
+              trackMySession(eventJson.conversation_id);
             }
 
             if (eventJson.message) {
               setLoadingStep(eventJson.message);
+            }
+
+            // Real-time ABS Compliance Stage (Prompt 1)
+            if (eventJson.stage === "abs_compliance" && eventJson.data) {
+              currentAbsCompliance = eventJson.data;
+              if (currentAssistantId) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === currentAssistantId ? { ...m, abs_compliance: eventJson.data } : m
+                  )
+                );
+              }
+            }
+
+            // Real-time TKDL Prior-Art Pointer Stage (Prompt 2)
+            if (eventJson.stage === "tkdl_pointer" && eventJson.data) {
+              currentTkdlPointer = eventJson.data;
+              if (eventJson.data.case_study) {
+                currentCaseStudy = eventJson.data.case_study;
+              }
+              if (currentAssistantId) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === currentAssistantId
+                      ? {
+                          ...m,
+                          tkdl_pointer: eventJson.data,
+                          case_study: eventJson.data.case_study || currentCaseStudy,
+                        }
+                      : m
+                  )
+                );
+              }
             }
 
             // Real-time live token streaming into message bubble
@@ -422,6 +847,8 @@ export default function Home() {
                   id: currentAssistantId,
                   role: "assistant",
                   content: "",
+                  abs_compliance: currentAbsCompliance,
+                  tkdl_pointer: currentTkdlPointer,
                   isStreaming: true,
                   timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 };
@@ -443,6 +870,8 @@ export default function Home() {
                     id: currentAssistantId,
                     role: "assistant",
                     content: accumulatedContent,
+                    abs_compliance: currentAbsCompliance,
+                    tkdl_pointer: currentTkdlPointer,
                     isStreaming: true,
                     timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                   };
@@ -467,6 +896,7 @@ export default function Home() {
               const data = eventJson.data;
               if (data.conversation_id) {
                 setConversationId(data.conversation_id);
+                trackMySession(data.conversation_id);
               }
               fetchConversations();
 
@@ -482,22 +912,31 @@ export default function Home() {
                   question: data.question,
                   language: data.language,
                   pending_formulation_answers: currentAnswers,
+                  abs_compliance: data.abs_compliance || currentAbsCompliance,
+                  tkdl_pointer: data.tkdl_pointer || currentTkdlPointer,
                   timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 };
                 setMessages((prev) => [...prev, assistantMsg]);
               } else {
+                const rawContent = data.answer || accumulatedContent || "No response text generated.";
                 const finalMsg: Message = {
                   id: currentAssistantId || Date.now().toString(),
                   role: "assistant",
-                  content: data.answer || accumulatedContent || "No response text generated.",
+                  content: rawContent,
+                  originalContent: rawContent,
+                  activeLanguage: "en",
+                  translations: { en: rawContent },
                   needs_classification: false,
                   classification: data.classification,
                   classification_citation: data.classification_citation,
                   citations: data.citations || [],
                   confidence: data.confidence || "medium",
                   abstained: data.abstained || false,
-                  language: data.language,
+                  language: data.language || "en",
                   provider_used: data.provider_used,
+                  abs_compliance: data.abs_compliance || currentAbsCompliance,
+                  tkdl_pointer: data.tkdl_pointer || currentTkdlPointer,
+                  case_study: data.case_study || data.tkdl_pointer?.case_study || currentCaseStudy,
                   isStreaming: false,
                   timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 };
@@ -532,8 +971,89 @@ export default function Home() {
     }
   };
 
-  const handleUserSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const sendCompareQueryToBackend = async (
+    query: string,
+    customHistory?: Message[]
+  ) => {
+    if (!query || !query.trim()) {
+      const errorMsg: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "Error 400: Query cannot be empty or whitespace-only.",
+        isError: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      return;
+    }
+
+    setIsLoading(true);
+    setBackendError(null);
+    setLoadingStep("Executing parallel dual-jurisdiction statutory analysis...");
+
+    const payload = {
+      query: query.trim(),
+      conversation_id: conversationId,
+      formulation_answers: formulationAnswers,
+    };
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/ask/compare`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        let errorDetail = `Server responded with status ${response.status}`;
+        try {
+          const errJson = await response.json();
+          if (errJson.detail) errorDetail = errJson.detail;
+        } catch (_) {}
+        throw new Error(errorDetail);
+      }
+
+      const data: JurisdictionComparisonData = await response.json();
+      if (data.conversation_id) {
+        setConversationId(data.conversation_id);
+        trackMySession(data.conversation_id);
+      }
+      fetchConversations();
+
+      const assistantMsg: Message = {
+        id: "compare-" + Date.now().toString(),
+        role: "assistant",
+        content: `Dual-Jurisdiction Analysis for: "${data.query}"`,
+        is_comparison: true,
+        comparison_data: data,
+        confidence:
+          data.national.confidence === "high" || data.international.confidence === "high"
+            ? "high"
+            : "medium",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
+      console.error("Compare request error:", err);
+      setBackendError(err.message || `Unable to execute comparison at ${API_BASE_URL}`);
+      const errorMsg: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: `Comparison Error: ${err.message || "Failed to communicate with IP-SAKTI Sahayak backend"}.`,
+        isError: true,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleUserSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!inputQuery.trim() || isLoading) return;
 
     const currentQuery = inputQuery.trim();
@@ -550,7 +1070,12 @@ export default function Home() {
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInputQuery("");
-    sendQueryToBackend(currentQuery, {}, jurisdiction, newMessages);
+
+    if (isCompareMode) {
+      sendCompareQueryToBackend(currentQuery, newMessages);
+    } else {
+      sendQueryToBackend(currentQuery, {}, jurisdiction, newMessages);
+    }
   };
 
   const handleClassificationSelect = (answerKey: string, answerValue: boolean) => {
@@ -574,8 +1099,53 @@ export default function Home() {
     sendQueryToBackend(lastQuery, updatedAnswers, jurisdiction, newMessages);
   };
 
+  const handleABSOptionSelect = async (msgId: string, answerKey: string, answerValue: boolean) => {
+    const msg = messages.find((m) => m.id === msgId);
+    const existingAnswers = msg?.abs_compliance?.answers || {};
+    const updatedAnswers = {
+      ...existingAnswers,
+      [answerKey]: answerValue,
+    };
+
+    // Determine query context from last query or message content
+    let associatedQuery = lastQuery;
+    if (!associatedQuery && msg) {
+      const msgIdx = messages.findIndex((m) => m.id === msgId);
+      if (msgIdx > 0) {
+        for (let i = msgIdx - 1; i >= 0; i--) {
+          if (messages[i].role === "user") {
+            associatedQuery = messages[i].content;
+            break;
+          }
+        }
+      }
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/compliance/abs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: associatedQuery || "",
+          answers: updatedAnswers,
+        }),
+      });
+      if (res.ok) {
+        const data: ABSComplianceData = await res.json();
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? { ...m, abs_compliance: data }
+              : m
+          )
+        );
+      }
+    } catch (err) {
+      console.warn("Failed to update ABS compliance:", err);
+    }
+  };
+
   const handleSamplePromptClick = (sample: SamplePrompt) => {
-    setJurisdiction(sample.jurisdiction);
     setLastQuery(sample.query);
     setFormulationAnswers(sample.answers);
 
@@ -586,7 +1156,15 @@ export default function Home() {
       timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     };
     setMessages([userMsg]);
-    sendQueryToBackend(sample.query, sample.answers, sample.jurisdiction);
+
+    if (sample.is_compare) {
+      setIsCompareMode(true);
+      sendCompareQueryToBackend(sample.query, [userMsg]);
+    } else {
+      setIsCompareMode(false);
+      setJurisdiction(sample.jurisdiction);
+      sendQueryToBackend(sample.query, sample.answers, sample.jurisdiction, [userMsg]);
+    }
   };
 
   const handleResetChat = () => {
@@ -606,224 +1184,277 @@ export default function Home() {
         <div className="absolute inset-0 bg-[radial-gradient(#eab308_1px,transparent_1px)] [background-size:32px_32px] opacity-[0.035]" />
       </div>
 
-      {/* Top Fixed Header */}
-      <header className="sticky top-0 z-40 w-full border-b border-amber-500/15 bg-[#070605]/80 backdrop-blur-xl px-4 lg:px-8 py-3.5 flex items-center justify-between shadow-2xl">
+      {/* Top Fixed Slim Nav */}
+      <header className="sticky top-0 z-40 w-full border-b border-white/5 bg-[#070605]/85 backdrop-blur-md px-4 sm:px-8 py-3 flex items-center justify-between">
+        {/* Left: Minimal Wordmark */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 via-amber-600/30 to-black border border-amber-400/30 flex items-center justify-center shadow-[0_0_15px_rgba(234,179,8,0.2)]">
-            <Scale className="w-5 h-5 text-[#fefae0]" />
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-400/20 flex items-center justify-center text-amber-400">
+            <Scale className="w-4 h-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display text-xl tracking-wider text-[#f5eedb]">IP-SAKTI SAHAYAK</span>
-              <span className="text-[10px] font-semibold tracking-widest uppercase px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300">
-                v1.0
-              </span>
-            </div>
-            <p className="text-xs text-stone-400 tracking-wide font-light hidden sm:block">
-              Statutory Ayurvedic & Traditional Knowledge Regulatory AI
-            </p>
+          <div className="flex items-baseline gap-2">
+            <span className="font-display text-lg tracking-wider text-[#f5eedb]">IP-SAKTI</span>
+            <span className="text-[11px] tracking-widest text-stone-400 font-mono">SAHAYAK</span>
           </div>
         </div>
 
-        {/* Center: Jurisdiction Toggle Pill */}
-        <div className="flex items-center bg-[#12100d] p-1 rounded-full border border-amber-500/25 shadow-inner">
+        {/* Center: Plain-Text Nav Items */}
+        <nav className="hidden md:flex items-center gap-6 text-xs font-medium text-stone-300">
           <button
-            onClick={() => setJurisdiction("national")}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
-              jurisdiction === "national"
-                ? "bg-[#f5eedb] text-[#070605] font-semibold shadow-[0_0_15px_rgba(245,238,219,0.3)]"
-                : "text-stone-400 hover:text-stone-200"
-            }`}
+            onClick={() => setShowCorpusModal(true)}
+            className="hover:text-amber-300 transition-colors"
           >
-            <Shield className="w-3.5 h-3.5" />
-            <span>India (National)</span>
+            Corpus (17 Acts)
           </button>
-          <button
-            onClick={() => setJurisdiction("international")}
-            className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-medium transition-all duration-200 ${
-              jurisdiction === "international"
-                ? "bg-[#f5eedb] text-[#070605] font-semibold shadow-[0_0_15px_rgba(245,238,219,0.3)]"
-                : "text-stone-400 hover:text-stone-200"
-            }`}
+          <a
+            href={`${API_BASE_URL}/admin/audit/view`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-emerald-300 transition-colors inline-flex items-center gap-1"
           >
-            <Globe2 className="w-3.5 h-3.5" />
-            <span>Global (Treaties)</span>
-          </button>
-        </div>
+            <span>DPDP Audit</span>
+            <ExternalLink className="w-2.5 h-2.5 opacity-70" />
+          </a>
+        </nav>
 
-        {/* Right Status Indicator & Actions */}
-        <div className="flex items-center gap-2.5">
+        {/* Right: Consolidated Utility Buttons */}
+        <div className="flex items-center gap-2">
           <button
             onClick={() => {
               fetchConversations();
               setShowHistoryModal(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#181410] hover:bg-stone-900 border border-amber-500/30 text-amber-300 text-xs font-medium transition-all shadow-sm"
-            title="View Past Inquiries & Sessions"
+            className="p-2 rounded-xl text-stone-300 hover:text-amber-300 hover:bg-white/5 transition-colors relative"
+            title="Session History"
           >
-            <History className="w-3.5 h-3.5 text-amber-400" />
-            <span>History {conversationsList.length > 0 ? `(${conversationsList.length})` : ""}</span>
+            <History className="w-4 h-4" />
+            {myConversations.length > 0 && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />
+            )}
           </button>
 
           <button
             onClick={() => setShowCorpusModal(true)}
-            className="hidden md:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#181410] hover:bg-stone-900 border border-amber-500/30 text-amber-300 text-xs font-medium transition-all shadow-sm"
+            className="md:hidden p-2 rounded-xl text-stone-300 hover:text-amber-300 hover:bg-white/5 transition-colors"
+            title="Corpus (17 Acts)"
           >
-            <Database className="w-3.5 h-3.5 text-amber-400" />
-            <span>17 Verified Statutes</span>
+            <Database className="w-4 h-4" />
           </button>
-
-          <a
-            href={`${API_BASE_URL}/admin/audit/view`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#181410] hover:bg-stone-900 border border-emerald-500/30 text-emerald-300 text-xs font-medium transition-all shadow-sm"
-            title="Inspect DPDP Minimal Query Audit Trail"
-          >
-            <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            <span>DPDP Audit ↗</span>
-          </a>
 
           {messages.length > 0 && (
             <button
               onClick={handleResetChat}
-              className="p-2 rounded-xl text-stone-400 hover:text-[#f5eedb] hover:bg-white/5 border border-transparent hover:border-amber-500/20 transition-all text-xs flex items-center gap-1.5"
+              className="p-2 rounded-xl text-stone-300 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1.5 text-xs font-medium"
               title="Start New Inquiry"
             >
               <RotateCcw className="w-4 h-4" />
-              <span className="hidden sm:inline">Reset</span>
+              <span className="hidden sm:inline">New Query</span>
             </button>
           )}
         </div>
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col max-w-5xl w-full mx-auto px-4 sm:px-6 z-10 pt-4 pb-36">
-        {/* LANDING / IDLE STATE */}
+      <div className="flex-1 flex flex-col max-w-6xl w-full mx-auto px-4 sm:px-6 z-10 pt-4 pb-36">
+        {/* LANDING / IDLE STATE (Split-Screen Hero) */}
         {messages.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center my-auto py-8 text-center">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-[#181410] border border-amber-500/30 text-amber-300/90 text-xs font-medium tracking-wider uppercase mb-6 shadow-[0_0_20px_rgba(234,179,8,0.15)]">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>CITATION-GROUNDED STATUTORY CO-PILOT</span>
-            </div>
-
-            <h1 className="font-display text-5xl sm:text-7xl lg:text-8xl tracking-tight text-[#f5eedb] leading-[0.9] uppercase max-w-4xl mx-auto drop-shadow-2xl">
-              PROTECT THE HERITAGE. <br />
-              <span className="text-[#fefae0] drop-shadow-[0_0_35px_rgba(234,179,8,0.25)]">
-                OWN THE FUTURE.
-              </span>
-            </h1>
-
-            <p className="mt-4 text-sm sm:text-base text-stone-300 max-w-2xl mx-auto font-light leading-relaxed">
-              Verify Ayurvedic patentability under <strong className="text-amber-200 font-medium">Section 3(p)</strong>, navigate <strong className="text-amber-200 font-medium">Rule 158-B</strong> ASU drug classifications, and comply with <strong className="text-amber-200 font-medium">NBA & Nagoya</strong> access-benefit sharing.
-            </p>
-
-            {/* Central Visual Focal Graphic */}
-            <div className="relative w-full max-w-3xl my-10 flex items-center justify-center">
-              <div className="relative w-48 h-48 sm:w-60 sm:h-60 rounded-full bg-gradient-to-b from-amber-400/20 via-amber-950/60 to-black border border-amber-400/40 flex items-center justify-center shadow-[0_0_80px_rgba(234,179,8,0.25)] group">
-                <div className="absolute inset-2 rounded-full border border-amber-300/20 border-dashed animate-[spin_60s_linear_infinite]" />
-                <div className="text-center p-4 z-10">
-                  <div className="w-14 h-14 mx-auto mb-2 rounded-2xl bg-[#0a0806] border border-amber-400/40 flex items-center justify-center shadow-inner">
-                    <BookOpen className="w-7 h-7 text-[#fefae0]" />
-                  </div>
-                  <span className="font-display text-base tracking-widest text-[#f5eedb] uppercase block">
-                    AYUSH STATUTES
-                  </span>
-                  <span className="text-[11px] text-amber-300/80 font-mono tracking-wider">
-                    VERIFIED & INDEXED
-                  </span>
-                </div>
-              </div>
-
-              {/* Floating Glass Telemetry Cards */}
-              <div className="absolute -left-2 sm:left-4 top-0 glass-panel p-3.5 rounded-2xl max-w-[200px] text-left hidden sm:block border-amber-500/20">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-mono tracking-widest uppercase text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    ONLINE
-                  </span>
-                  <span className="text-[9px] text-stone-500 font-mono">100% GROUNDED</span>
-                </div>
-                <div className="font-display text-xl text-[#f5eedb]">17 STATUTES</div>
-                <div className="text-[11px] text-stone-400">Indexed & Hybrid Reranked</div>
-              </div>
-
-              <div className="absolute -right-2 sm:right-4 top-2 glass-panel p-3.5 rounded-2xl max-w-[200px] text-left hidden sm:block border-amber-500/20">
-                <div className="text-[10px] font-mono tracking-widest uppercase text-amber-400/90 mb-1">
-                  REGULATORY ACCURACY
-                </div>
-                <div className="font-display text-xl text-[#f5eedb]">+100% CITATIONS</div>
-                <div className="text-[11px] text-stone-400">Zero Unverified Claims</div>
-              </div>
-
-              <div className="absolute -left-2 sm:left-6 bottom-0 glass-panel p-3.5 rounded-2xl max-w-[220px] text-left hidden sm:block border-amber-500/20">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] font-mono tracking-widest uppercase text-amber-300/90">
-                    CLASSIFICATION
-                  </span>
-                  <span className="text-[9px] text-stone-500 font-mono">D&C ACT</span>
-                </div>
-                <ul className="text-[11px] space-y-1 text-stone-300">
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Classical Medicine
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Proprietary Medicine
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Phytopharmaceuticals
-                  </li>
-                </ul>
-              </div>
-
-              <div className="absolute -right-2 sm:right-6 bottom-0 glass-panel p-3.5 rounded-2xl max-w-[210px] text-left hidden sm:block border-amber-500/20">
-                <div className="text-[10px] font-mono tracking-widest uppercase text-amber-300/90 mb-1.5">
-                  INTELLIGENT RAG
-                </div>
-                <div className="text-[11px] text-stone-300 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Section 3(p) TKDL
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Rule 158-B Trials
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <Check className="w-3 h-3 text-amber-400 shrink-0" /> Form 25D Licensing
+          <div className="flex-1 flex flex-col justify-center my-auto py-8 lg:py-12">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+              {/* Left Column: Wordmark Headline, MSME Line, Numerals, Soft Seal Graphic */}
+              <div className="lg:col-span-6 flex flex-col justify-center relative pr-0 lg:pr-4">
+                {/* Soft Graphic Element (Pattern #6): Glowing Seal Motif in background */}
+                <div className="absolute -left-10 -top-10 w-80 h-80 pointer-events-none opacity-20 select-none hidden sm:block">
+                  <div className="w-full h-full rounded-full border border-amber-400/25 border-dashed animate-[spin_120s_linear_infinite]" />
+                  <div className="absolute inset-8 rounded-full border border-amber-300/15" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Scale className="w-28 h-28 text-amber-400/25 stroke-[1]" />
                   </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Quick Benchmark Questions */}
-            <div className="w-full max-w-4xl mt-2">
-              <div className="text-xs font-mono tracking-widest uppercase text-stone-400 mb-3 flex items-center justify-center gap-2">
-                <FileCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span>SELECT A VERIFIED STATUTORY QUERY</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
-                {SAMPLE_PROMPTS.map((sample, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSamplePromptClick(sample)}
-                    className="glass-panel glass-panel-hover p-4 rounded-2xl flex items-start justify-between gap-3 group text-left"
-                  >
+                <div className="relative z-10 space-y-5">
+                  <div className="inline-flex items-center gap-2 text-xs font-mono tracking-widest text-amber-400/90 uppercase">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    <span>Statutory AYUSH Intelligence</span>
+                  </div>
+
+                  <h1 className="font-display text-4xl sm:text-6xl lg:text-6xl font-bold tracking-tight text-[#f5eedb] leading-[0.95] uppercase">
+                    Protect <br />
+                    The Heritage. <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-100">
+                      Own The Future.
+                    </span>
+                  </h1>
+
+                  <p className="text-xs sm:text-sm text-stone-300 font-light leading-relaxed max-w-lg">
+                    Statutory Ayurvedic & Traditional Knowledge verification under Section 3(p), ASU drug classification under Rule 158-B, and NBA/Nagoya access-benefit clearance.
+                  </p>
+
+                  {/* Non-lawyer plain language line (Accuracy Fix #2) */}
+                  <div className="p-3.5 rounded-xl bg-amber-500/5 border-l-2 border-amber-400/70 text-xs sm:text-sm text-stone-200 leading-relaxed max-w-lg">
+                    <span className="text-amber-300 font-medium">In plain terms:</span> find out what you can protect, and how, before you invest.
+                  </div>
+
+                  {/* Confident Large Numerals (Pattern #3) */}
+                  <div className="grid grid-cols-3 gap-4 sm:gap-6 pt-4 border-t border-white/5 max-w-lg">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-semibold text-[#f5eedb] group-hover:text-amber-300 transition-colors">
-                          {sample.title}
-                        </span>
-                        <span className="text-[9px] uppercase font-mono px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-400/20 text-amber-300">
-                          {sample.jurisdiction}
-                        </span>
-                      </div>
-                      <p className="text-xs text-stone-400 line-clamp-2 leading-relaxed">
-                        {sample.query}
-                      </p>
+                      <div className="font-mono text-3xl sm:text-4xl font-bold text-[#f5eedb] tracking-tight">17</div>
+                      <div className="text-[11px] font-mono text-stone-400 mt-1">Verified Acts</div>
                     </div>
-                    <ArrowRight className="w-4 h-4 text-stone-500 group-hover:text-amber-300 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
-                  </button>
-                ))}
+                    <div>
+                      <div className="font-mono text-3xl sm:text-4xl font-bold text-amber-300 tracking-tight">~300ms</div>
+                      <div className="text-[11px] font-mono text-stone-400 mt-1">Dual RAG Recall</div>
+                    </div>
+                    <div>
+                      <div className="font-mono text-3xl sm:text-4xl font-bold text-[#f5eedb] tracking-tight">87.5%</div>
+                      <div className="text-[11px] font-mono text-stone-400 mt-1">Recall@5 Benchmark</div>
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {/* Right Column: Functional Swap-Style Tool Panel */}
+              <div className="lg:col-span-6 flex flex-col justify-center">
+                <div className="bg-[#0c0a08]/95 border border-white/10 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-4">
+                  {/* Tool Header: Primary Jurisdiction Segmented Control */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-mono text-stone-400 px-1">
+                      <span>JURISDICTION MODE</span>
+                      {isCompareMode && (
+                        <span className="text-[10px] text-amber-300 font-semibold uppercase">Dual Parallel Inference</span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 bg-black/60 p-1 rounded-2xl border border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJurisdiction("national");
+                          setIsCompareMode(false);
+                        }}
+                        className={`py-2 px-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                          !isCompareMode && jurisdiction === "national"
+                            ? "bg-[#1f1a14] text-amber-200 border border-amber-400/30 shadow-sm"
+                            : "text-stone-400 hover:text-stone-200"
+                        }`}
+                      >
+                        <Shield className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">India</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setJurisdiction("international");
+                          setIsCompareMode(false);
+                        }}
+                        className={`py-2 px-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                          !isCompareMode && jurisdiction === "international"
+                            ? "bg-[#1f1a14] text-sky-200 border border-sky-400/30 shadow-sm"
+                            : "text-stone-400 hover:text-stone-200"
+                        }`}
+                      >
+                        <Globe2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Global</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsCompareMode(true)}
+                        className={`py-2 px-2 rounded-xl text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${
+                          isCompareMode
+                            ? "bg-amber-400/15 text-amber-300 border border-amber-400/40 shadow-sm"
+                            : "text-stone-400 hover:text-stone-200"
+                        }`}
+                      >
+                        <Columns2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">Compare</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Query Input Well */}
+                  <div className="bg-black/70 border border-white/5 focus-within:border-amber-400/50 rounded-2xl p-4 transition-all space-y-2.5">
+                    <textarea
+                      ref={heroTextareaRef}
+                      value={inputQuery}
+                      onChange={(e) => setInputQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleUserSubmit();
+                        }
+                      }}
+                      placeholder={
+                        isCompareMode
+                          ? "Compare National (Patents Act) vs International (Nagoya / WIPO) side-by-side..."
+                          : `Ask any Ayurvedic patent, licensing (Rule 158-B), or biodiversity question (${
+                              jurisdiction === "national" ? "India" : "Global"
+                            })...`
+                      }
+                      rows={3}
+                      disabled={isLoading}
+                      className="w-full bg-transparent border-0 outline-none text-sm sm:text-base text-[#f5eedb] placeholder-stone-400 resize-none font-light leading-relaxed focus:ring-0"
+                    />
+
+                    <div className="flex items-center justify-between text-[11px] text-stone-400 pt-2 border-t border-white/5 font-mono">
+                      <span>Retrieval-verified citations</span>
+                      <span>Press Enter ↵ to ask</span>
+                    </div>
+                  </div>
+
+                  {/* Single Clear Accent CTA Button (Pattern #5) */}
+                  <button
+                    type="button"
+                    onClick={() => handleUserSubmit()}
+                    disabled={!inputQuery.trim() || isLoading}
+                    className="w-full py-3.5 sm:py-4 rounded-2xl bg-amber-400 hover:bg-amber-300 active:scale-[0.99] text-stone-950 font-bold text-sm sm:text-base shadow-[0_0_25px_rgba(251,191,36,0.3)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-black" />
+                    ) : (
+                      <>
+                        <span>{isCompareMode ? "Compare Both Jurisdictions" : "Ask Sahayak"}</span>
+                        <ArrowRight className="w-4 h-4 text-stone-950 stroke-[2.5]" />
+                      </>
+                    )}
+                  </button>
+
+                  {/* Streamlined Suggested Queries */}
+                  <div className="space-y-2 pt-1">
+                    <div className="text-[11px] font-mono tracking-wider uppercase text-stone-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-amber-400" />
+                      <span>Quick Verified Queries</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {SAMPLE_PROMPTS.slice(0, 4).map((sample, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSamplePromptClick(sample)}
+                          className="p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.07] border border-white/5 hover:border-amber-400/30 text-stone-300 hover:text-[#f5eedb] text-xs font-normal transition-all text-left flex items-center justify-between gap-2 group"
+                        >
+                          <span className="truncate">{sample.title}</span>
+                          <ArrowRight className="w-3 h-3 text-stone-400 group-hover:text-amber-300 group-hover:translate-x-0.5 transition-all shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Provenance & Microcopy (High Contrast) */}
+            <div className="mt-8 pt-4 border-t border-white/5 text-center flex flex-wrap items-center justify-center gap-3 text-xs text-stone-400 font-mono">
+              <span>Every claim cites its source</span>
+              <span>•</span>
+              <button
+                onClick={() => setShowCorpusModal(true)}
+                className="text-amber-400/90 hover:text-amber-300 hover:underline transition-colors"
+              >
+                17 Indexed Statutory Acts
+              </button>
+              <span>•</span>
+              <span>Multilingual AI Translation with English citation anchors</span>
             </div>
           </div>
         )}
@@ -845,6 +1476,280 @@ export default function Home() {
                     </div>
                     <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center shrink-0 mt-1">
                       <User className="w-4 h-4 text-amber-200" />
+                    </div>
+                  </div>
+                );
+              }
+
+              // Parallel Comparison Response View
+              if (msg.is_comparison && msg.comparison_data) {
+                const cmp = msg.comparison_data;
+                return (
+                  <div key={msg.id} className="w-full space-y-4 animate-in fade-in-50 duration-300">
+                    {/* Top Comparative Header & Zero Overlap Badge */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-2xl bg-[#0d0b09]/95 border border-amber-500/30 backdrop-blur-xl shadow-2xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 via-amber-600/30 to-black border border-amber-400/40 flex items-center justify-center text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.25)]">
+                          <Columns2 className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-sm sm:text-base font-display font-semibold text-[#f5eedb] tracking-wide">
+                              Side-by-Side Jurisdiction Comparison
+                            </h2>
+                            <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300">
+                              Dual Parallel RAG
+                            </span>
+                          </div>
+                          <p className="text-xs text-stone-400 font-light">
+                            Independent statutory pipelines: National (India) vs International (Treaties)
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {/* Parallel Latency Badge */}
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-white/5 border border-white/10 text-stone-300">
+                          <span className="text-stone-400">Parallel Latency:</span>
+                          <span className="text-amber-300 font-semibold">{cmp.latency_ms}ms</span>
+                        </span>
+
+                        {/* Zero Overlap Badge (Item 4 in requirements) */}
+                        {cmp.is_zero_overlap ? (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium bg-emerald-950/70 border border-emerald-500/50 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>0 shared sources — jurisdictions kept separate</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium bg-rose-950/70 border border-rose-500/50 text-rose-300">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                            <span>{cmp.shared_citations_count} Shared Sources Overlap</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Dual Panels Grid: Side-by-Side on Desktop (grid-cols-2), Stacked on Mobile (grid-cols-1) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 w-full items-stretch">
+                      {/* Left Panel: India (National) */}
+                      <div className="glass-panel rounded-2xl p-5 sm:p-6 border border-amber-500/30 bg-gradient-to-b from-[#120f0b]/95 to-[#090806]/95 shadow-2xl flex flex-col justify-between">
+                        <div>
+                          {/* Panel Header */}
+                          <div className="flex items-center justify-between border-b border-amber-500/15 pb-3.5 mb-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-400/30 flex items-center justify-center text-amber-300">
+                                <Shield className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="font-display text-sm font-semibold tracking-wide text-amber-100 uppercase">
+                                  India (National)
+                                </span>
+                                <span className="block text-[10px] text-stone-400 font-mono">
+                                  Patents Act, Biological Diversity, D&C
+                                </span>
+                              </div>
+                            </div>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium uppercase ${
+                                cmp.national.confidence?.toLowerCase() === "high"
+                                  ? "bg-emerald-950/60 border border-emerald-500/40 text-emerald-300"
+                                  : cmp.national.confidence?.toLowerCase() === "medium"
+                                  ? "bg-amber-950/60 border border-amber-500/40 text-amber-300"
+                                  : "bg-rose-950/60 border border-rose-500/40 text-rose-300"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  cmp.national.confidence?.toLowerCase() === "high"
+                                    ? "bg-emerald-400"
+                                    : cmp.national.confidence?.toLowerCase() === "medium"
+                                    ? "bg-amber-400"
+                                    : "bg-rose-400"
+                                }`}
+                              />
+                              {cmp.national.confidence} Confidence
+                            </span>
+                          </div>
+
+                          {/* Classification badge if present */}
+                          {cmp.national.classification && (
+                            <div className="mb-3">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-400/20 text-amber-300 text-[11px] font-mono uppercase">
+                                <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                                {cmp.national.classification.replace(/_/g, " ")}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Answer Content or Abstention */}
+                          {cmp.national.abstained ? (
+                            <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-400/30 text-amber-200 text-xs sm:text-sm space-y-2">
+                              <div className="flex items-center gap-2 font-semibold text-amber-300 uppercase tracking-wider">
+                                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                                <span>No Relevant National Authority (Abstained)</span>
+                              </div>
+                              <p className="text-stone-300 leading-relaxed font-light whitespace-pre-line">
+                                {cmp.national.answer}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="prose prose-invert prose-amber max-w-none text-xs sm:text-sm leading-relaxed text-[#ede8d5] font-light whitespace-pre-line">
+                              {cmp.national.answer}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Citation Ledger Underneath National Panel */}
+                        <div className="mt-6 pt-4 border-t border-amber-500/15">
+                          <div className="text-xs font-mono uppercase tracking-wider text-amber-400/90 mb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <FileCheck className="w-3.5 h-3.5 text-amber-400" />
+                              <span>National Statutory Citations ({cmp.national.citations?.length || 0})</span>
+                            </div>
+                            <span className="text-[10px] text-stone-500 font-mono">Domestic Law</span>
+                          </div>
+
+                          {cmp.national.citations && cmp.national.citations.length > 0 ? (
+                            <div className="space-y-2">
+                              {cmp.national.citations.map((cit, cIdx) => {
+                                const pdfUrl = getCitationPdfUrl(cit);
+                                return (
+                                  <div
+                                    key={cIdx}
+                                    className="p-3 rounded-xl bg-black/40 border border-amber-500/20 hover:border-amber-400/50 transition-all flex flex-col justify-between"
+                                  >
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                      <span className="text-[11px] font-mono text-amber-300 font-bold">
+                                        {cit.section}
+                                      </span>
+                                      <a
+                                        href={pdfUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-400/30 text-[10px] text-amber-300 hover:bg-amber-400 hover:text-black transition-all"
+                                      >
+                                        <FileText className="w-2.5 h-2.5" />
+                                        <span>PDF</span>
+                                        <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                                      </a>
+                                    </div>
+                                    <div className="text-xs text-stone-300 font-normal leading-snug">
+                                      {cit.source}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-stone-500 italic">No national statutory citations recorded.</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right Panel: International (Treaties) */}
+                      <div className="glass-panel rounded-2xl p-5 sm:p-6 border border-sky-500/30 bg-gradient-to-b from-[#0b1016]/95 to-[#07090e]/95 shadow-2xl flex flex-col justify-between">
+                        <div>
+                          {/* Panel Header */}
+                          <div className="flex items-center justify-between border-b border-sky-500/15 pb-3.5 mb-4">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-400/30 flex items-center justify-center text-sky-300">
+                                <Globe2 className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="font-display text-sm font-semibold tracking-wide text-sky-100 uppercase">
+                                  International (Treaties)
+                                </span>
+                                <span className="block text-[10px] text-stone-400 font-mono">
+                                  Nagoya Protocol, WIPO GRATK, TRIPS, CBD
+                                </span>
+                              </div>
+                            </div>
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium uppercase ${
+                                cmp.international.confidence?.toLowerCase() === "high"
+                                  ? "bg-emerald-950/60 border border-emerald-500/40 text-emerald-300"
+                                  : cmp.international.confidence?.toLowerCase() === "medium"
+                                  ? "bg-amber-950/60 border border-amber-500/40 text-amber-300"
+                                  : "bg-rose-950/60 border border-rose-500/40 text-rose-300"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  cmp.international.confidence?.toLowerCase() === "high"
+                                    ? "bg-emerald-400"
+                                    : cmp.international.confidence?.toLowerCase() === "medium"
+                                    ? "bg-amber-400"
+                                    : "bg-rose-400"
+                                }`}
+                              />
+                              {cmp.international.confidence} Confidence
+                            </span>
+                          </div>
+
+                          {/* Answer Content or Abstention */}
+                          {cmp.international.abstained ? (
+                            <div className="p-4 rounded-xl bg-sky-950/20 border border-sky-400/30 text-sky-200 text-xs sm:text-sm space-y-2">
+                              <div className="flex items-center gap-2 font-semibold text-sky-300 uppercase tracking-wider">
+                                <AlertTriangle className="w-4 h-4 text-sky-400 shrink-0" />
+                                <span>No Relevant Treaty Authority (Abstained)</span>
+                              </div>
+                              <p className="text-stone-300 leading-relaxed font-light whitespace-pre-line">
+                                {cmp.international.answer}
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="prose prose-invert prose-sky max-w-none text-xs sm:text-sm leading-relaxed text-[#ede8d5] font-light whitespace-pre-line">
+                              {cmp.international.answer}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Citation Ledger Underneath International Panel */}
+                        <div className="mt-6 pt-4 border-t border-sky-500/15">
+                          <div className="text-xs font-mono uppercase tracking-wider text-sky-400/90 mb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Globe2 className="w-3.5 h-3.5 text-sky-400" />
+                              <span>International Treaty Authorities ({cmp.international.citations?.length || 0})</span>
+                            </div>
+                            <span className="text-[10px] text-stone-500 font-mono">Global Conventions</span>
+                          </div>
+
+                          {cmp.international.citations && cmp.international.citations.length > 0 ? (
+                            <div className="space-y-2">
+                              {cmp.international.citations.map((cit, cIdx) => {
+                                const pdfUrl = getCitationPdfUrl(cit);
+                                return (
+                                  <div
+                                    key={cIdx}
+                                    className="p-3 rounded-xl bg-black/40 border border-sky-500/20 hover:border-sky-400/50 transition-all flex flex-col justify-between"
+                                  >
+                                    <div className="flex items-center justify-between gap-2 mb-1">
+                                      <span className="text-[11px] font-mono text-sky-300 font-bold">
+                                        {cit.section}
+                                      </span>
+                                      <a
+                                        href={pdfUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-400/30 text-[10px] text-sky-300 hover:bg-sky-400 hover:text-black transition-all"
+                                      >
+                                        <FileText className="w-2.5 h-2.5" />
+                                        <span>PDF</span>
+                                        <ExternalLink className="w-2.5 h-2.5 ml-0.5" />
+                                      </a>
+                                    </div>
+                                    <div className="text-xs text-stone-300 font-normal leading-snug">
+                                      {cit.source}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-stone-500 italic">No international treaty citations recorded.</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
@@ -989,14 +1894,498 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* SUBSTANTIVE ANSWER */}
+                      {/* SUBSTANTIVE ANSWER (Always front and center) */}
                       {!msg.needs_classification && !msg.abstained && (
-                        <div className="prose prose-invert prose-amber max-w-none text-sm sm:text-base leading-relaxed text-[#ede8d5] font-light whitespace-pre-line">
-                          {msg.content}
-                          {msg.isStreaming && (
-                            <span className="inline-block w-2 h-4 ml-1.5 bg-amber-400 animate-pulse rounded-sm align-middle" />
+                        <div>
+                          <div className="prose prose-invert prose-amber max-w-none text-sm sm:text-base leading-relaxed text-[#ede8d5] font-light whitespace-pre-line mb-4">
+                            {msg.content}
+                            {msg.isStreaming && (
+                              <span className="inline-block w-2 h-4 ml-1.5 bg-amber-400 animate-pulse rounded-sm align-middle" />
+                            )}
+                          </div>
+
+                          {/* SIMPLIFIED PLAIN-LANGUAGE RESPONSE (RENDERED DIRECTLY BELOW ORIGINAL ANSWER) */}
+                          {msg.showSimplified && msg.simplifiedContent && (
+                            <div className="mt-3.5 mb-4 p-4 rounded-xl bg-gradient-to-br from-emerald-950/45 via-stone-900/60 to-emerald-950/30 border border-emerald-500/35 shadow-[0_0_20px_rgba(16,185,129,0.08)] space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 rounded-md bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0">
+                                    <Sparkles className="w-3 h-3 text-emerald-400" />
+                                  </div>
+                                  <span className="text-xs font-mono font-semibold text-emerald-300">
+                                    Plain-Language Explanation (Simplified Register)
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleSimplify(msg.id)}
+                                  title="Hide simplified response"
+                                  className="text-stone-400 hover:text-stone-200 p-1 rounded hover:bg-white/5 transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-sm sm:text-base leading-relaxed text-emerald-100/95 font-light whitespace-pre-line">
+                                {msg.simplifiedContent}
+                              </p>
+                              <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-stone-400">
+                                <span className="text-emerald-400/80">Phrased for non-lawyers &bull; Same legal grounding</span>
+                                <span>See statutory citations below &darr;</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* REGIONAL TRANSLATION RESPONSE (RENDERED DIRECTLY BELOW ORIGINAL ANSWER) */}
+                          {msg.showTranslation && msg.activeTranslationText && (
+                            <div className="mt-3.5 mb-4 p-4 rounded-xl bg-gradient-to-br from-amber-950/45 via-stone-900/60 to-amber-950/30 border border-amber-500/35 shadow-[0_0_20px_rgba(245,158,11,0.08)] space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                              <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-5 h-5 rounded-md bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
+                                    <Languages className="w-3 h-3 text-amber-400" />
+                                  </div>
+                                  <span className="text-xs font-mono font-semibold text-amber-300">
+                                    {TRANSLATE_LANGUAGES.find((l) => l.code === msg.activeLanguage)?.name || "Regional"} Translation
+                                    <span className="text-stone-400 font-normal ml-1">
+                                      ({TRANSLATE_LANGUAGES.find((l) => l.code === msg.activeLanguage)?.native || msg.activeLanguage})
+                                    </span>
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTranslateMessage(msg.id, "en")}
+                                  title="Hide translation"
+                                  className="text-stone-400 hover:text-stone-200 p-1 rounded hover:bg-white/5 transition-colors"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-sm sm:text-base leading-relaxed text-amber-100/95 font-light whitespace-pre-line">
+                                {msg.activeTranslationText}
+                              </p>
+                              <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-stone-400">
+                                <span className="text-amber-400/80">Statutory citations strictly preserved in English</span>
+                                <span>See statutory citations below &darr;</span>
+                              </div>
+                            </div>
                           )}
                         </div>
+                      )}
+
+                      {/* DEDICATED ABS COMPLIANCE HELPER PANEL (PROMPT 1) */}
+                      {msg.abs_compliance && msg.abs_compliance.triggered && (
+                        <div className="mb-6 rounded-2xl bg-gradient-to-b from-[#08130e]/95 via-[#0b1712]/90 to-[#070e0a]/95 border border-emerald-500/40 p-5 sm:p-6 shadow-[0_0_35px_rgba(16,185,129,0.14)] space-y-5">
+                          {/* Panel Header */}
+                          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-emerald-500/20 pb-3.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-400/50 flex items-center justify-center text-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.3)] shrink-0">
+                                <Leaf className="w-4 h-4 text-emerald-400" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-semibold tracking-wide text-emerald-200">
+                                    ABS Compliance Helper
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono uppercase bg-emerald-500/15 border border-emerald-400/30 text-emerald-300">
+                                    Structured Flow
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-stone-400 font-mono">
+                                  Biological Diversity Act, 2002 (as amended 2023) · BD Rules 2024
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-medium ${
+                                  msg.abs_compliance.status === "completed"
+                                    ? "bg-emerald-950/80 border border-emerald-400/50 text-emerald-300"
+                                    : "bg-amber-950/80 border border-amber-400/50 text-amber-300 animate-pulse"
+                                }`}
+                              >
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    msg.abs_compliance.status === "completed" ? "bg-emerald-400" : "bg-amber-400"
+                                  }`}
+                                />
+                                {msg.abs_compliance.status === "completed" ? "Evaluation Complete" : "Action Required"}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Decision Questions Stepper & Interactive Selectors */}
+                          <div className="space-y-3">
+                            <div className="text-[11px] uppercase tracking-wider font-mono text-emerald-400/80 flex items-center gap-1.5">
+                              <Sprout className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Statutory Decision Flow (Click to Test Scenarios):</span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {/* Q1: Sourced in India */}
+                              <div className="p-3.5 rounded-xl bg-black/40 border border-emerald-500/20 space-y-2">
+                                <div className="text-[10px] font-mono text-stone-400 uppercase">1. Resource Origin</div>
+                                <div className="text-xs font-medium text-stone-200 leading-snug">
+                                  Sourced in India?
+                                </div>
+                                <div className="flex gap-1.5 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_sourced_from_india", true)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_sourced_from_india === true
+                                        ? "bg-emerald-500 text-black font-semibold shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    India (Domestic)
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_sourced_from_india", false)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_sourced_from_india === false
+                                        ? "bg-rose-500 text-white font-semibold shadow-[0_0_10px_rgba(244,63,94,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    Outside India
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Q2: Purpose */}
+                              <div className="p-3.5 rounded-xl bg-black/40 border border-emerald-500/20 space-y-2">
+                                <div className="text-[10px] font-mono text-stone-400 uppercase">2. Utilization Purpose</div>
+                                <div className="text-xs font-medium text-stone-200 leading-snug">
+                                  Commercial vs Research?
+                                </div>
+                                <div className="flex gap-1.5 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_commercial_use", true)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_commercial_use === true
+                                        ? "bg-emerald-500 text-black font-semibold shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    Commercial / Export
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_commercial_use", false)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_commercial_use === false
+                                        ? "bg-emerald-500 text-black font-semibold shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    Research Only
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Q3: Entity Type */}
+                              <div className="p-3.5 rounded-xl bg-black/40 border border-emerald-500/20 space-y-2">
+                                <div className="text-[10px] font-mono text-stone-400 uppercase">3. Applicant Entity</div>
+                                <div className="text-xs font-medium text-stone-200 leading-snug">
+                                  Domestic vs Foreign Entity?
+                                </div>
+                                <div className="flex gap-1.5 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_foreign_entity", false)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_foreign_entity === false
+                                        ? "bg-emerald-500 text-black font-semibold shadow-[0_0_10px_rgba(16,185,129,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    Indian Entity
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, "is_foreign_entity", true)}
+                                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all ${
+                                      msg.abs_compliance.answers?.is_foreign_entity === true
+                                        ? "bg-amber-500 text-black font-semibold shadow-[0_0_10px_rgba(245,158,11,0.4)]"
+                                        : "bg-stone-900/80 text-stone-400 hover:text-stone-200 border border-white/5"
+                                    }`}
+                                  >
+                                    Foreign / NRI (S. 3(2))
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Pending Question Callout if Needs Input */}
+                          {msg.abs_compliance.status === "needs_input" && msg.abs_compliance.next_question && (
+                            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/40 space-y-2">
+                              <div className="flex items-center gap-2 text-xs font-mono uppercase text-amber-300">
+                                <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                                <span>Pending Compliance Clarification:</span>
+                              </div>
+                              <p className="text-sm font-medium text-[#f5eedb] leading-snug">
+                                {msg.abs_compliance.next_question.question}
+                              </p>
+                              {msg.abs_compliance.next_question.help_text && (
+                                <p className="text-xs text-stone-400 leading-relaxed">
+                                  {msg.abs_compliance.next_question.help_text}
+                                </p>
+                              )}
+                              <div className="flex flex-wrap gap-2.5 pt-1.5">
+                                {msg.abs_compliance.next_question.options.map((opt, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => handleABSOptionSelect(msg.id, msg.abs_compliance!.next_question!.id, opt.value)}
+                                    className="px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-black font-semibold text-xs transition-colors shadow-md flex items-center gap-2"
+                                  >
+                                    <span>{opt.label}</span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Structured Results Card */}
+                          {msg.abs_compliance.result && (
+                            <div className="p-4 sm:p-5 rounded-xl bg-black/50 border border-emerald-500/30 space-y-4">
+                              {/* Dual Approval Status Verdict Badges */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {/* NBA Approval Verdict */}
+                                <div
+                                  className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                                    msg.abs_compliance.result.requires_nba_approval
+                                      ? "bg-rose-950/40 border-rose-500/40 text-rose-200"
+                                      : "bg-emerald-950/30 border-emerald-500/30 text-emerald-200"
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                                      National Biodiversity Authority (NBA)
+                                    </div>
+                                    <div className="text-sm font-semibold mt-0.5">
+                                      {msg.abs_compliance.result.requires_nba_approval ? "Prior Approval Required" : "No NBA Approval Required"}
+                                    </div>
+                                  </div>
+                                  {msg.abs_compliance.result.requires_nba_approval ? (
+                                    <span className="px-2.5 py-1 rounded-md bg-rose-500/20 border border-rose-400/40 text-rose-300 text-xs font-mono font-bold">
+                                      MANDATORY
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-mono font-bold">
+                                      EXEMPT
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* SBB Intimation Verdict */}
+                                <div
+                                  className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                                    msg.abs_compliance.result.requires_sbb_intimation
+                                      ? "bg-amber-950/40 border-amber-500/40 text-amber-200"
+                                      : "bg-stone-900/40 border-white/10 text-stone-400"
+                                  }`}
+                                >
+                                  <div>
+                                    <div className="text-[10px] font-mono uppercase tracking-wider text-stone-400">
+                                      State Biodiversity Board (SBB)
+                                    </div>
+                                    <div className="text-sm font-semibold mt-0.5">
+                                      {msg.abs_compliance.result.requires_sbb_intimation
+                                        ? `Prior Intimation Required (${msg.abs_compliance.result.sbb_state ? msg.abs_compliance.result.sbb_state + " KSBB" : "State SBB"})`
+                                        : "No SBB Intimation Required"}
+                                    </div>
+                                  </div>
+                                  {msg.abs_compliance.result.requires_sbb_intimation ? (
+                                    <span className="px-2.5 py-1 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs font-mono font-bold">
+                                      MANDATORY
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 rounded-md bg-stone-800 border border-stone-700 text-stone-400 text-xs font-mono font-bold">
+                                      N/A
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Applicable Statutory Provision */}
+                              <div className="p-3.5 rounded-lg bg-emerald-950/20 border border-emerald-500/25 space-y-1.5">
+                                <div className="flex items-center gap-2 text-xs font-mono text-emerald-300 font-semibold">
+                                  <Scale className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span>Applicable Provision: {msg.abs_compliance.result.applicable_provision}</span>
+                                </div>
+                                {msg.abs_compliance.result.exact_statutory_text && (
+                                  <p className="text-xs text-stone-300 leading-relaxed font-light italic">
+                                    &ldquo;{msg.abs_compliance.result.exact_statutory_text}&rdquo;
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Next Steps Checklist */}
+                              {msg.abs_compliance.result.next_steps?.length > 0 && (
+                                <div className="space-y-2">
+                                  <div className="text-xs font-mono uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                    <span>Prescribed Regulatory Next Steps:</span>
+                                  </div>
+                                  <div className="space-y-2">
+                                    {msg.abs_compliance.result.next_steps.map((step, sIdx) => (
+                                      <div key={sIdx} className="flex items-start gap-2.5 text-xs text-stone-300 leading-relaxed">
+                                        <span className="w-5 h-5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 flex items-center justify-center shrink-0 font-mono text-[10px] font-bold mt-0.5">
+                                          {sIdx + 1}
+                                        </span>
+                                        <span>{step}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Relevant Statutory Forms */}
+                              {msg.abs_compliance.result.relevant_forms?.length > 0 && (
+                                <div className="pt-2 border-t border-white/5 flex flex-wrap items-center gap-2">
+                                  <span className="text-[11px] font-mono text-stone-400">Relevant Statutory Forms:</span>
+                                  {msg.abs_compliance.result.relevant_forms.map((form, fIdx) => (
+                                    <span
+                                      key={fIdx}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-mono"
+                                    >
+                                      <FileText className="w-3 h-3 text-emerald-400" />
+                                      <span>{form}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* CONDITIONAL INLINE TKDL PRIOR-ART NOTE */}
+                      {msg.tkdl_pointer && msg.tkdl_pointer.triggered && (
+                        <div className="mt-4 p-3.5 rounded-xl bg-indigo-950/30 border border-indigo-500/30 text-xs text-stone-300 flex items-start gap-2.5 shadow-sm">
+                          <BookOpen className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                          <div className="space-y-1 leading-relaxed">
+                            <div>
+                              <span className="font-semibold text-indigo-300">Prior-Art Clearance (TKDL): </span>
+                              <span>
+                                Classical formulations belong to the public domain under Section 3(p) of the Patents Act, 1970 and are catalogued in the Traditional Knowledge Digital Library (
+                              </span>
+                              <a
+                                href="https://www.tkdl.res.in"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-0.5 text-indigo-300 hover:text-indigo-100 underline font-mono text-[11px]"
+                              >
+                                <span>tkdl.res.in</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                              <span>).</span>
+                            </div>
+                            <p className="text-[11px] text-stone-400 font-light">
+                              TKDL is accessed directly by patent examiners during examination rather than via open public search.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* HISTORICAL BIOPIRACY PRECEDENTS CARD (TURMERIC & NEEM) - PROMPT 1 */}
+                      {((msg.case_study && msg.case_study.triggered) ||
+                        (msg.tkdl_pointer?.case_study && msg.tkdl_pointer.case_study.triggered)) && (
+                        (() => {
+                          const cs = msg.case_study || msg.tkdl_pointer?.case_study;
+                          if (!cs) return null;
+                          return (
+                            <div className="mt-4 rounded-2xl bg-gradient-to-b from-[#14100b]/95 via-[#19130d]/90 to-[#0f0c08]/95 border border-amber-600/35 p-4 sm:p-5 shadow-[0_0_30px_rgba(217,119,6,0.12)] space-y-4">
+                              {/* Header */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/20 pb-3">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-7 h-7 rounded-lg bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shadow-[0_0_10px_rgba(245,158,11,0.25)] shrink-0">
+                                    <History className="w-4 h-4 text-amber-400" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs sm:text-sm font-semibold tracking-wide text-amber-200">
+                                        Historical Landmark Precedents: Turmeric &amp; Neem Revocations
+                                      </span>
+                                      <span className="hidden sm:inline-block px-2 py-0.5 rounded-full text-[9px] font-mono uppercase bg-amber-500/15 border border-amber-400/30 text-amber-300">
+                                        Case Law
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-stone-400 font-light">
+                                      Real-world patent office precedents establishing Section 3(p) &amp; TKDL
+                                    </p>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-mono px-2.5 py-1 rounded-md bg-stone-900/80 border border-white/10 text-stone-400">
+                                  USPTO &amp; EPO Revocation Records
+                                </span>
+                              </div>
+
+                              {/* Two Landmark Case Cards Side-by-Side */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {/* Turmeric Case */}
+                                <div className="p-3.5 rounded-xl bg-black/45 border border-amber-500/25 space-y-2 flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                      <span className="text-xs font-mono font-bold text-amber-300 tracking-wide">
+                                        TURMERIC CASE
+                                      </span>
+                                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-400/30 text-rose-300 font-semibold">
+                                        Revoked 1997
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] font-mono text-stone-400 mb-2 flex items-center justify-between">
+                                      <span>USPTO &bull; US Patent 5,401,504</span>
+                                      <span className="text-stone-400 text-[10px]">Granted 1995</span>
+                                    </div>
+                                    <p className="text-xs text-stone-300 leading-relaxed font-light">
+                                      In 1995, the US Patent and Trademark Office granted US Patent 5,401,504 to the University of Mississippi Medical Center for turmeric powder&apos;s wound-healing use. India&apos;s CSIR filed a re-examination request in 1996 with 32 prior-art references from traditional and scientific literature, and the USPTO revoked the patent in 1997 after finding the use was already known traditional knowledge, not a novel invention.
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Neem Case */}
+                                <div className="p-3.5 rounded-xl bg-black/45 border border-amber-500/25 space-y-2 flex flex-col justify-between">
+                                  <div>
+                                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                                      <span className="text-xs font-mono font-bold text-amber-300 tracking-wide">
+                                        NEEM CASE
+                                      </span>
+                                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-400/30 text-rose-300 font-semibold">
+                                        Revoked 2000 (Appeal 2005)
+                                      </span>
+                                    </div>
+                                    <div className="text-[11px] font-mono text-stone-400 mb-2 flex items-center justify-between">
+                                      <span>EPO &bull; EP 436257</span>
+                                      <span className="text-stone-400 text-[10px]">Granted 1994</span>
+                                    </div>
+                                    <p className="text-xs text-stone-300 leading-relaxed font-light">
+                                      In 1994, the European Patent Office granted a patent (EP 436257) to the US Department of Agriculture and W.R. Grace for a neem-based fungicide. Following opposition on grounds that neem&apos;s antifungal use was centuries-old Indian traditional knowledge, the EPO revoked the patent in 2000, a decision upheld on final appeal in 2005 &mdash; the world&apos;s first patent revoked specifically on biopiracy grounds.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Closing Statutory Takeaway Banner */}
+                              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-400/25 text-xs text-amber-200/95 leading-relaxed font-light">
+                                <span className="font-semibold text-amber-300">Statutory Significance: </span>
+                                These cases are part of why Section 3(p) of the Patents Act, 1970 excludes traditional knowledge from patentability, and why the Traditional Knowledge Digital Library (TKDL) exists &mdash; to document India&apos;s traditional knowledge so it can be used as prior art before a wrongful patent is even granted, rather than fought after the fact.
+                              </div>
+
+                              {/* Footnote Citation */}
+                              <div className="pt-2 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono text-stone-400">
+                                <span>
+                                  Sources: WIPO Traditional Knowledge Case Studies (WIPO/GRTKF); USPTO Reexamination Certificate B1 5,401,504; EPO Opposition Decision EP 0436257 B1.
+                                </span>
+                                <span className="text-stone-400">Public historical patent office records</span>
+                              </div>
+                            </div>
+                          );
+                        })()
                       )}
 
                       {/* STATUTORY CITATION CARDS */}
@@ -1046,7 +2435,7 @@ export default function Home() {
                                   </a>
 
                                   {/* Bottom metadata with Primary Source indicator & optional official portal link */}
-                                  <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[9px] font-mono text-stone-500">
+                                  <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[9px] font-mono text-stone-400">
                                     <span className="text-amber-500/70 flex items-center gap-1">
                                       <span>Primary PDF Record</span>
                                     </span>
@@ -1056,7 +2445,7 @@ export default function Home() {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         onClick={(e) => e.stopPropagation()}
-                                        className="hover:text-amber-300 hover:underline transition-colors flex items-center gap-1 text-stone-400"
+                                        className="hover:text-amber-300 hover:underline transition-colors flex items-center gap-1 text-stone-300"
                                         title={`Visit official registry website: ${officialUrl}`}
                                       >
                                         <span>Web Portal</span>
@@ -1073,7 +2462,7 @@ export default function Home() {
 
                       {/* Footer Metadata & Language Action */}
                       {!msg.isStreaming && (
-                        <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-500 font-mono">
+                        <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-400 font-mono">
                           <div className="flex items-center gap-3">
                             <span>
                               {msg.provider_used && `Provider: ${msg.provider_used.toUpperCase()}`}
@@ -1120,46 +2509,121 @@ export default function Home() {
                             )}
                           </div>
 
-                          {!msg.needs_classification && !msg.isError && (
-                            <div className="flex items-center gap-2">
-                              {msg.language === "hi" ? (
-                                <button
-                                  onClick={() => {
-                                    const userMsg: Message = {
-                                      id: Date.now().toString(),
-                                      role: "user",
-                                      content: "Convert the above response to English",
-                                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                                    };
-                                    const newMessages = [...messages, userMsg];
-                                    setMessages(newMessages);
-                                    sendQueryToBackend("Convert the above response to English", {}, jurisdiction, newMessages);
-                                  }}
-                                  disabled={isLoading}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
-                                >
-                                  <Globe2 className="w-3 h-3 text-amber-400" />
-                                  <span>Translate to English</span>
-                                </button>
+                          {!msg.needs_classification && !msg.isError && msg.role === "assistant" && (
+                            <div className="relative flex items-center gap-2">
+                              {/* Explain-Simply / Plain Language Register Toggle */}
+                              {msg.isSimplifying ? (
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-500/10 border border-emerald-400/30 text-emerald-300 text-[11px] font-sans font-medium animate-pulse">
+                                  <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                                  <span>Simplifying...</span>
+                                </div>
                               ) : (
                                 <button
-                                  onClick={() => {
-                                    const userMsg: Message = {
-                                      id: Date.now().toString(),
-                                      role: "user",
-                                      content: "उपरोक्त उत्तर को हिंदी में अनुवाद करें",
-                                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                                    };
-                                    const newMessages = [...messages, userMsg];
-                                    setMessages(newMessages);
-                                    sendQueryToBackend("उपरोक्त उत्तर को हिंदी में अनुवाद करें", {}, jurisdiction, newMessages);
-                                  }}
-                                  disabled={isLoading}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
+                                  type="button"
+                                  onClick={() => handleToggleSimplify(msg.id)}
+                                  title={
+                                    msg.showSimplified
+                                      ? "Hide plain language explanation"
+                                      : "Show plain-language explanation below"
+                                  }
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-sans font-medium transition-all ${
+                                    msg.showSimplified
+                                      ? "bg-emerald-500/20 border-emerald-400/60 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                                      : "bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-400/30 text-emerald-300"
+                                  }`}
                                 >
-                                  <Globe2 className="w-3 h-3 text-amber-400" />
-                                  <span>हिंदी में अनुवाद करें (Hindi)</span>
+                                  <Sparkles className={`w-3.5 h-3.5 ${msg.showSimplified ? "text-emerald-400" : "text-emerald-400/80"}`} />
+                                  <span>{msg.showSimplified ? "Hide Simplified" : "Simplify"}</span>
                                 </button>
+                              )}
+
+                              {/* If currently translating this message, show local loading spinner */}
+                              {msg.isTranslating ? (
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/10 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium animate-pulse">
+                                  <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                                  <span>Translating answer...</span>
+                                </div>
+                              ) : (
+                                <>
+                                  {/* Quick toggle to English / hide translation */}
+                                  {msg.showTranslation && msg.activeLanguage && msg.activeLanguage !== "en" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleTranslateMessage(msg.id, "en")}
+                                      title="Hide translation"
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-stone-800/80 hover:bg-stone-700/80 border border-stone-600/40 text-stone-300 hover:text-white text-[10px] font-sans font-medium transition-colors"
+                                    >
+                                      <X className="w-2.5 h-2.5 text-stone-400" />
+                                      <span>Hide {TRANSLATE_LANGUAGES.find((l) => l.code === msg.activeLanguage)?.name || "Translation"}</span>
+                                    </button>
+                                  )}
+
+                                  {/* Compact Translate trigger button */}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOpenTranslateMsgId(
+                                        openTranslateMsgId === msg.id ? null : msg.id
+                                      )
+                                    }
+                                    title="Translate answer into Indian regional language"
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-sans font-medium transition-all ${
+                                      msg.showTranslation && msg.activeLanguage && msg.activeLanguage !== "en"
+                                        ? "bg-amber-500/20 border-amber-400/60 text-amber-200 shadow-[0_0_10px_rgba(245,158,11,0.2)]"
+                                        : "bg-amber-500/10 hover:bg-amber-500/20 border-amber-400/30 text-amber-300"
+                                    }`}
+                                  >
+                                    <Languages className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>
+                                      {msg.showTranslation && msg.activeLanguage && msg.activeLanguage !== "en"
+                                        ? TRANSLATE_LANGUAGES.find((l) => l.code === msg.activeLanguage)?.name || "Translated"
+                                        : "Translate"}
+                                    </span>
+                                    <ChevronDown className={`w-3 h-3 text-amber-400 transition-transform ${openTranslateMsgId === msg.id ? "rotate-180" : ""}`} />
+                                  </button>
+
+                                  {/* Compact Language Picker Dropdown */}
+                                  {openTranslateMsgId === msg.id && (
+                                    <div
+                                      className="absolute right-0 bottom-full mb-2 z-50 w-52 rounded-xl bg-[#14120e] border border-amber-500/30 shadow-2xl p-1.5 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <div className="px-2.5 py-1.5 border-b border-white/5 text-[10px] font-mono uppercase tracking-wider text-stone-400 flex items-center justify-between">
+                                        <span>Select Language</span>
+                                        <span className="text-[9px] text-amber-400/80">Citations in English</span>
+                                      </div>
+                                      <div className="py-1 space-y-0.5">
+                                        {TRANSLATE_LANGUAGES.map((lang) => {
+                                          const isCurrent = (msg.activeLanguage || "en") === lang.code;
+                                          const isCached = !!msg.translations?.[lang.code];
+                                          return (
+                                            <button
+                                              key={lang.code}
+                                              type="button"
+                                              onClick={() => handleTranslateMessage(msg.id, lang.code)}
+                                              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left text-xs transition-colors ${
+                                                isCurrent
+                                                  ? "bg-amber-500/20 text-amber-200 font-semibold"
+                                                  : "text-stone-300 hover:bg-white/5 hover:text-white"
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-2">
+                                                <span className="font-sans font-medium">{lang.name}</span>
+                                                <span className="text-[11px] text-stone-400">({lang.native})</span>
+                                              </div>
+                                              <div className="flex items-center gap-1 text-[10px] text-stone-400 font-mono">
+                                                {isCurrent && <Check className="w-3 h-3 text-amber-400" />}
+                                                {!isCurrent && isCached && (
+                                                  <span className="text-[9px] px-1 rounded bg-stone-800 text-stone-300">cached</span>
+                                                )}
+                                              </div>
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )}
@@ -1169,15 +2633,15 @@ export default function Home() {
                       {/* Optional Thumbs-Down Reason / Comment Input Drawer */}
                       {!msg.needs_classification && !msg.isError && msg.role === "assistant" && feedbackState[msg.id]?.showCommentInput && (
                         <div className="mt-3 p-3 rounded-xl bg-black/60 border border-amber-500/30 text-xs space-y-2.5">
-                          <div className="flex items-center justify-between text-stone-300 font-sans font-medium">
-                            <span>What could be improved? <span className="text-stone-500 text-[10px] font-normal">(optional)</span></span>
+                          <div className="flex items-center justify-between text-stone-200 font-sans font-medium">
+                            <span>What could be improved? <span className="text-stone-400 text-[10px] font-normal">(optional)</span></span>
                             <button
                               type="button"
                               onClick={() => setFeedbackState((prev) => ({
                                 ...prev,
                                 [msg.id]: { ...prev[msg.id], showCommentInput: false, submitted: true }
                               }))}
-                              className="text-stone-500 hover:text-stone-300 text-[11px]"
+                              className="text-stone-400 hover:text-stone-200 text-[11px]"
                             >
                               Dismiss
                             </button>
@@ -1258,60 +2722,74 @@ export default function Home() {
         )}
       </div>
 
-      {/* FLOATING FIXED BOTTOM QUERY BAR */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 p-4 sm:p-6 bg-gradient-to-t from-[#050403] via-[#050403]/95 to-transparent backdrop-blur-md">
-        <div className="max-w-4xl mx-auto">
-          <form
-            onSubmit={handleUserSubmit}
-            className="relative flex items-center glass-panel rounded-2xl p-2 sm:p-2.5 border-amber-500/30 focus-within:border-amber-400/80 focus-within:shadow-[0_0_30px_rgba(234,179,8,0.2)] transition-all shadow-2xl"
-          >
-            <div className="pl-3 pr-2 text-stone-500">
-              <Bot className="w-5 h-5 text-amber-400" />
+      {/* FLOATING FIXED BOTTOM QUERY BAR (Only active during ongoing inquiry) */}
+      {messages.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-30 p-4 sm:p-6 bg-gradient-to-t from-[#050403] via-[#050403]/95 to-transparent backdrop-blur-md">
+          <div className="max-w-4xl mx-auto">
+            <form
+              onSubmit={handleUserSubmit}
+              className="relative flex items-center glass-panel rounded-2xl p-2 sm:p-2.5 border-amber-500/30 focus-within:border-amber-400/80 focus-within:shadow-[0_0_30px_rgba(234,179,8,0.2)] transition-all shadow-2xl"
+            >
+              <div className="pl-3 pr-2 text-stone-400">
+                <Bot className="w-5 h-5 text-amber-400" />
+              </div>
+
+              <input
+                ref={inputRef}
+                type="text"
+                value={inputQuery}
+                onChange={(e) => setInputQuery(e.target.value)}
+                placeholder={
+                  isCompareMode
+                    ? "Compare National (India) vs International (Treaties) side-by-side..."
+                    : `Ask any Ayurvedic regulatory or patent question (${
+                        jurisdiction === "national" ? "India" : "International"
+                      })...`
+                }
+                disabled={isLoading}
+                className="flex-1 bg-transparent border-0 outline-none text-sm sm:text-base text-[#f5eedb] placeholder-stone-400 px-2 py-1.5 focus:ring-0"
+              />
+
+              <button
+                type="submit"
+                disabled={!inputQuery.trim() || isLoading}
+                className={`px-4 sm:px-6 py-2.5 rounded-xl font-semibold text-xs sm:text-sm transition-all shadow-md flex items-center gap-2 shrink-0 disabled:opacity-40 cursor-pointer ${
+                  isCompareMode
+                    ? "bg-gradient-to-r from-amber-400 to-amber-500 text-stone-950 hover:brightness-110 shadow-[0_0_20px_rgba(251,191,36,0.35)]"
+                    : "bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold shadow-[0_0_20px_rgba(251,191,36,0.25)]"
+                }`}
+              >
+                {isLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-black" />
+                ) : (
+                  <>
+                    <span>{isCompareMode ? "COMPARE BOTH" : "ASK SAHAYAK"}</span>
+                    {isCompareMode ? (
+                      <Columns2 className="w-3.5 h-3.5 text-black" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5 text-black" />
+                    )}
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-2 text-center flex items-center justify-center gap-4 text-[11px] text-stone-400 font-mono">
+              <button
+                onClick={() => setShowCorpusModal(true)}
+                className="text-amber-400/90 hover:text-amber-300 transition-colors flex items-center gap-1"
+              >
+                <Database className="w-3 h-3" />
+                <span>Corpus Provenance (17 Source Acts)</span>
+              </button>
+              <span>•</span>
+              <span className="text-stone-300">Multilingual AI Translation with English citation anchors</span>
+              <span>•</span>
+              <span className="text-amber-400/90">Informational guidance under Indian law</span>
             </div>
-
-            <input
-              ref={inputRef}
-              type="text"
-              value={inputQuery}
-              onChange={(e) => setInputQuery(e.target.value)}
-              placeholder={`Ask any Ayurvedic regulatory or patent question (${
-                jurisdiction === "national" ? "India" : "International"
-              })...`}
-              disabled={isLoading}
-              className="flex-1 bg-transparent border-0 outline-none text-sm sm:text-base text-[#f5eedb] placeholder-stone-500 px-2 py-1.5 focus:ring-0"
-            />
-
-            <button
-              type="submit"
-              disabled={!inputQuery.trim() || isLoading}
-              className="px-4 sm:px-6 py-2.5 rounded-xl bg-[#f5eedb] hover:bg-white text-[#070605] font-semibold text-xs sm:text-sm transition-all shadow-md flex items-center gap-2 shrink-0 disabled:opacity-40 disabled:hover:bg-[#f5eedb]"
-            >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin text-black" />
-              ) : (
-                <>
-                  <span>ASK SAHAYAK</span>
-                  <Send className="w-3.5 h-3.5 text-black" />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="mt-2 text-center flex items-center justify-center gap-4 text-[11px] text-stone-500 font-mono">
-            <button
-              onClick={() => setShowCorpusModal(true)}
-              className="text-amber-400/80 hover:text-amber-300 transition-colors flex items-center gap-1"
-            >
-              <Database className="w-3 h-3" />
-              <span>Corpus Provenance (17 Source Acts)</span>
-            </button>
-            <span>•</span>
-            <span>Multilingual Bhashini Translation Ready</span>
-            <span>•</span>
-            <span className="text-amber-500/80">Informational guidance, not formal legal advice</span>
           </div>
         </div>
-      </div>
+      )}
 
       {/* CORPUS PROVENANCE DRAWER / MODAL (Item 4) */}
       {showCorpusModal && (
@@ -1524,29 +3002,54 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-stone-400 uppercase tracking-wider">
-                Saved Sessions ({conversationsList.length})
-              </span>
+            {/* Scoped Session Tabs (Accuracy Fix #3) */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-1.5 p-1 bg-black/60 rounded-xl border border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab("my")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    historyTab === "my"
+                      ? "bg-amber-400 text-stone-950 font-bold shadow-sm"
+                      : "text-stone-400 hover:text-stone-200"
+                  }`}
+                >
+                  My Inquiries ({myConversations.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab("archive")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    historyTab === "archive"
+                      ? "bg-amber-400 text-stone-950 font-bold shadow-sm"
+                      : "text-stone-400 hover:text-stone-200"
+                  }`}
+                >
+                  System Archive ({conversationsList.length})
+                </button>
+              </div>
+
               <button
                 onClick={() => {
                   handleResetChat();
                   setShowHistoryModal(false);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400/15 border border-amber-400/30 hover:bg-amber-400/25 text-amber-300 text-xs font-semibold transition-all"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400/15 border border-amber-400/30 hover:bg-amber-400/25 text-amber-300 text-xs font-semibold transition-all cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>New Session</span>
               </button>
             </div>
 
-            {conversationsList.length === 0 ? (
-              <div className="text-center py-12 text-stone-500 text-sm">
-                No previous inquiries saved yet. Start a consultation to persist your session.
+            {displayedConversations.length === 0 ? (
+              <div className="text-center py-12 text-stone-400 text-sm font-light">
+                {historyTab === "my"
+                  ? "No inquiries saved in this session yet. Ask any question to start recording your personal inquiry history."
+                  : "No historical conversations found in the system archive."}
               </div>
             ) : (
               <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
-                {conversationsList.map((conv) => (
+                {displayedConversations.map((conv) => (
                   <div
                     key={conv.id}
                     onClick={() => loadConversation(conv.id)}
@@ -1565,7 +3068,7 @@ export default function Home() {
                           {conv.jurisdiction}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] text-stone-400 font-mono">
+                      <div className="flex items-center gap-3 text-[10px] text-stone-300 font-mono">
                         <span>{conv.message_count} messages</span>
                         <span>•</span>
                         <span>{new Date(conv.updated_at).toLocaleDateString()}</span>
@@ -1574,12 +3077,12 @@ export default function Home() {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         onClick={(e) => deleteConversation(conv.id, e)}
-                        className="p-1.5 rounded-lg text-stone-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="p-1.5 rounded-lg text-stone-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
                         title="Delete conversation"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
-                      <ArrowRight className="w-4 h-4 text-stone-500 group-hover:text-amber-300 group-hover:translate-x-0.5 transition-all" />
+                      <ArrowRight className="w-4 h-4 text-stone-400 group-hover:text-amber-300 group-hover:translate-x-0.5 transition-all" />
                     </div>
                   </div>
                 ))}

@@ -1,0 +1,42 @@
+{
+  "en": {
+    "name": "English",
+    "script": "Latin",
+    "script_char_count": 446,
+    "citations_preserved_in_text": true,
+    "citations_object_intact": true,
+    "sample_output": "Under Section 3(p) of the Patents Act, 1970, an invention which in effect is traditional knowledge or which is an aggregation or duplication of known properties of traditionally known component or components is not an invention and is non-patentable. Furthermore, Section 3(e) excludes mere admixture..."
+  },
+  "hi": {
+    "name": "Hindi",
+    "script": "Devanagari",
+    "script_char_count": 344,
+    "citations_preserved_in_text": true,
+    "citations_object_intact": true,
+    "sample_output": "1970 के Patents Act की Section 3(p) के अनुसार, वह आविष्कार जो मूलतः पारंपरिक ज्ञान है या जो पारंपरिक रूप से ज्ञात घटक या घटकों की ज्ञात विशेषताओं का संकलन या प्रतिकृति है, वह आविष्कार नहीं माना जाता और इसका पेटेंट नहीं दिया जा सकता। आगे, Section 3(e) केवल घटकों की विशेषताओं के संकलन के परिणामस्वरूप ..."
+  },
+  "pa": {
+    "name": "Punjabi",
+    "script": "Gurmukhi",
+    "script_char_count": 312,
+    "citations_preserved_in_text": true,
+    "citations_object_intact": true,
+    "sample_output": "ਪੇਟੈਂਟ ਐਕਟ, 1970 ਦੀ Section 3(p) ਅਨੁਸਾਰ, ਇੱਕ ਆਵਿਸ਼ਕਾਰ ਜੋ ਵਾਸਤਵ ਵਿੱਚ ਰਵਾਇਤੀ ਗਿਆਨ ਹੈ ਜਾਂ ਜੋ ਰਵਾਇਤੀ ਤੌਰ 'ਤੇ ਜਾਣੀਆਂ ਗਈਆਂ ਘਟਕਾਂ ਜਾਂ ਘਟਕਾਂ ਦੀਆਂ ਜਾਣੀਆਂ ਗੁਣਾਂ ਦੀ ਇਕੱਠੀ ਜਾਂ ਦੁਹਰਾਈ ਹੋਈ ਰਚਨਾ ਹੈ, ਉਹ ਆਵਿਸ਼ਕਾਰ ਨਹੀਂ ਮੰਨਿਆ ਜਾਂਦਾ ਅਤੇ ਅਪੈਟੈਂਟਯੋਗ ਹੁੰਦਾ ਹੈ। ਇਸ ਤੋਂ ਇਲਾਵਾ, Section 3(e) ਸਿਰਫ਼ ਉਹੀ ਮਿਲਾਓ-ਜੁਲਾਓ ਨੂੰ ਬਾਹਰ ਕਰਦੀ..."
+  },
+  "ml": {
+    "name": "Malayalam",
+    "script": "Malayalam",
+    "script_char_count": 396,
+    "citations_preserved_in_text": true,
+    "citations_object_intact": true,
+    "sample_output": "പാറ്റന്‍സ് ആക്റ്റ്, 1970‑ലെ Section 3(p) പ്രകാരം, പരമ്പരാഗത ജ്ഞാനം എന്നതോ, അല്ലെങ്കില്‍ പരമ്പരാഗതമായി അറിയപ്പെടുന്ന ഘടകങ്ങളോ ഘടകങ്ങളുടെ സവിശേഷതകളുടെ സംയോജനമോ പുനരുത്പാദനമോ ആയ കണ്ടുപിടിത്തം കണ്ടുപിടിത്തമെന്നു കണക്കാക്കപ്പെടാതെ, അതിനാല്‍ പാറ്റന്‍ട്ട് ലഭിക്കാത്തതുമാണ്. കൂടാതെ, Section 3(e) ഘടകങ്ങളുടെ സ..."
+  },
+  "ta": {
+    "name": "Tamil",
+    "script": "Tamil",
+    "script_char_count": 321,
+    "citations_preserved_in_text": true,
+    "citations_object_intact": true,
+    "sample_output": "1970 ஆம் ஆண்டு Patents Act இன் Section 3(p) கீழ், உண்மையில் பாரம்பரிய அறிவாக இருக்கும் அல்லது பாரம்பரியமாக அறியப்பட்ட கூறுகள் அல்லது கூறுகளின் அறியப்பட்ட பண்புகளின் கூட்டம் அல்லது நகல் ஆகும் கண்டுபிடிப்பு ஒரு கண்டுபிடிப்பு அல்ல மற்றும் 그것은 paten​t‑க்குரியதல்ல. மேலும், Section 3(e) கூறுகளின் பண்புகளி..."
+  }
+}

@@ -19,10 +19,25 @@ from app.classification.tree import (
     get_next_question,
     CLASSIFICATION_CITATIONS,
 )
+from app.compliance.abs_helper import (
+    detect_abs_trigger,
+    extract_abs_initial_answers,
+    evaluate_abs_compliance,
+    get_next_abs_question,
+    process_abs_decision_flow,
+    ABS_QUESTIONS,
+)
+from app.compliance.tkdl_helper import (
+    detect_tkdl_trigger,
+    extract_tkdl_hints,
+    build_tkdl_pointer_payload,
+    get_case_study_payload,
+    is_classical_formulation_query,
+)
 from app.retrieval.retrieve import retrieve
 from app.llm.client import get_completion, stream_completion
 from app.llm.prompts import SYSTEM_PROMPT
-from app.translation.bhashini import translate_text as bhashini_translate
+from app.translation.bhashini import translate_text as bhashini_translate, is_bhashini_configured
 from app.db.session_store import get_default_session_store
 
 logger = logging.getLogger("IP-SAKTI.API")
@@ -120,6 +135,10 @@ class AskRequest(BaseModel):
         default_factory=dict,
         description="Answers to the formulation classification decision tree",
     )
+    abs_answers: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Answers to the ABS compliance decision tree (is_sourced_from_india, is_commercial_use, is_foreign_entity)",
+    )
     conversation_id: Optional[str] = Field(
         default=None,
         description="Optional conversation thread ID",
@@ -215,6 +234,52 @@ def parse_translation_followup(
         for pat in hindi_patterns:
             if re.search(pat, st):
                 return ("hi", "Hindi", text_to_translate, citations)
+
+    # 3. Punjabi translation request patterns
+    punjabi_patterns = [
+        r"(?:convert|translate|give|explain|show|write|rephrase|tell|provide).*(?:above|previous|last|that|it|this|response|answer|message).*(?:in|to|into)\s*(?:punjabi|panjabi|gurmukhi|ਪੰਜਾਬੀ)",
+        r"(?:in|to|into)\s*(?:punjabi|panjabi|gurmukhi|ਪੰਜਾਬੀ)\s*(?:please|plz)?$",
+        r"(?:punjabi|panjabi|gurmukhi|ਪੰਜਾਬੀ)\s*(?:please|translation|me|mein|version|variant)?$",
+        r"translate\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*(?:punjabi|panjabi)",
+        r"convert\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*(?:punjabi|panjabi)",
+        r"ਪੰਜਾਬੀ ਵਿੱਚ",
+        r"ਪੰਜਾਬੀ ਅਨੁਵਾਦ",
+        r"ਉਪਰੋਕਤ.*ਪੰਜਾਬੀ",
+    ]
+    for st in search_texts:
+        for pat in punjabi_patterns:
+            if re.search(pat, st):
+                return ("pa", "Punjabi", text_to_translate, citations)
+
+    # 4. Malayalam translation request patterns
+    malayalam_patterns = [
+        r"(?:convert|translate|give|explain|show|write|rephrase|tell|provide).*(?:above|previous|last|that|it|this|response|answer|message).*(?:in|to|into)\s*(?:malayalam|മലയാളം)",
+        r"(?:in|to|into)\s*(?:malayalam|മലയാളം)\s*(?:please|plz)?$",
+        r"(?:malayalam|മലയാളം)\s*(?:please|translation|me|mein|version|variant)?$",
+        r"translate\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*malayalam",
+        r"convert\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*malayalam",
+        r"മലയാളത്തിൽ",
+        r"മലയാളം വിവർത്തനം",
+    ]
+    for st in search_texts:
+        for pat in malayalam_patterns:
+            if re.search(pat, st):
+                return ("ml", "Malayalam", text_to_translate, citations)
+
+    # 5. Tamil translation request patterns
+    tamil_patterns = [
+        r"(?:convert|translate|give|explain|show|write|rephrase|tell|provide).*(?:above|previous|last|that|it|this|response|answer|message).*(?:in|to|into)\s*(?:tamil|தமிழ்)",
+        r"(?:in|to|into)\s*(?:tamil|தமிழ்)\s*(?:please|plz)?$",
+        r"(?:tamil|தமிழ்)\s*(?:please|translation|me|mein|version|variant)?$",
+        r"translate\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*tamil",
+        r"convert\s+(?:the\s+)?(?:above|previous|this|that|it)?\s*(?:response|answer)?\s*(?:to|in|into)?\s*tamil",
+        r"தமிழில்",
+        r"தமிழ் மொழிபெயர்ப்பு",
+    ]
+    for st in search_texts:
+        for pat in tamil_patterns:
+            if re.search(pat, st):
+                return ("ta", "Tamil", text_to_translate, citations)
 
     return None
 
@@ -570,31 +635,84 @@ def enrich_citations(raw_citations: List[Any], chunks: Optional[List[Dict[str, A
     return enriched
 
 
+SUPPORTED_TRANSLATION_LANGUAGES: Dict[str, Dict[str, str]] = {
+    "en": {"name": "English", "native": "English", "script": "Latin"},
+    "hi": {"name": "Hindi", "native": "हिन्दी", "script": "Devanagari"},
+    "pa": {"name": "Punjabi", "native": "ਪੰਜਾਬੀ", "script": "Gurmukhi"},
+    "ml": {"name": "Malayalam", "native": "മലയാളം", "script": "Malayalam"},
+    "ta": {"name": "Tamil", "native": "தமிழ்", "script": "Tamil"},
+}
+
+LANGUAGE_ALIASES: Dict[str, str] = {
+    "en": "en", "english": "en", "eng": "en",
+    "hi": "hi", "hindi": "hi", "hin": "hi",
+    "pa": "pa", "punjabi": "pa", "panjabi": "pa", "pun": "pa",
+    "ml": "ml", "malayalam": "ml", "mal": "ml",
+    "ta": "ta", "tamil": "ta", "tam": "ta",
+}
+
+
+def resolve_target_language(target: str) -> Tuple[str, Dict[str, str]]:
+    """Normalizes language code or name to canonical ISO code and metadata."""
+    norm = target.strip().lower()
+    code = LANGUAGE_ALIASES.get(norm, norm)
+    meta = SUPPORTED_TRANSLATION_LANGUAGES.get(code, {
+        "name": norm.title(),
+        "native": norm.title(),
+        "script": "standard",
+    })
+    return code, meta
+
+
+def translate_answer_text(text: str, target_lang: str) -> str:
+    """Translates legal answer text into one of the target languages while strictly preserving statutory citations."""
+    if not text or not text.strip():
+        return text
+
+    code, meta = resolve_target_language(target_lang)
+    if code == "en":
+        return text
+
+    # 1. Attempt Bhashini translation if configured
+    if is_bhashini_configured():
+        bhashini_res = bhashini_translate(text, source_lang="en", target_lang=code)
+        if bhashini_res:
+            logger.info(f"[Translate] Translated via Bhashini: 'en' -> '{code}'")
+            return bhashini_res
+
+    # 2. High-precision LLM legal translation preserving statutory citations
+    lang_name = meta["name"]
+    script_name = meta["script"]
+    logger.info(f"[Translate] Translating legal text via LLM fallback to {lang_name} ({script_name} script)")
+
+    system_prompt = (
+        f"You are an expert legal translator specializing in Indian statutory and intellectual property law. "
+        f"Translate the following legal answer into {lang_name} using the official {script_name} script.\n\n"
+        f"MANDATORY LEGAL TRANSLATION RULES:\n"
+        f"1. DO NOT translate any statutory citations, Section/Rule numbers, Act titles, or treaty names "
+        f"(e.g. 'Patents Act, 1970', 'Section 3(p)', 'Rule 161', 'Drugs and Cosmetics Act, 1940', 'Biological Diversity Act, 2002', 'Nagoya Protocol'). "
+        f"Keep all statutory citations, sections, and rule numbers in standard English.\n"
+        f"2. Accurately translate all explanatory text and legal reasoning into natural, fluent, grammatically authoritative {lang_name} in {script_name} script.\n"
+        f"3. Translate the disclaimer: 'This is informational guidance, not legal advice.'\n"
+        f"4. Output ONLY the translated text, with no introductory banter, markdown code fences, or quotes."
+    )
+
+    try:
+        res = get_completion(
+            system_prompt=system_prompt,
+            user_prompt=text,
+            max_tokens=1024,
+        )
+        translated = res.get("text", "").strip()
+        return translated if translated else text
+    except Exception as e:
+        logger.error(f"[Translate] LLM translation to {code} failed: {e}")
+        return text
+
+
 def translate_previous_response(text: str, target_lang: str) -> str:
     """Translates previous assistant response to target language while preserving statutory citations and legal structure."""
-    if target_lang == "en":
-        system_prompt = (
-            "You are a professional legal translator specializing in Indian and international intellectual property law. "
-            "Translate the following legal response into clear, precise, authoritative English. "
-            "CRITICAL INSTRUCTIONS:\n"
-            "1. Preserve all statutory citations, Act names (e.g. 'Patents Act, 1970', 'Drugs and Cosmetics Rules, 1945', 'Rule 161', 'Section 3(p)'), and section numbers in standard English.\n"
-            "2. Translate all explanatory text and legal reasoning accurately.\n"
-            "3. End the answer with: 'This is informational guidance, not legal advice.'\n"
-            "4. Output ONLY the translated text without commentary, conversational preamble, or markdown code blocks."
-        )
-    else:
-        system_prompt = (
-            f"You are a legal translator specializing in Indian Ayurveda and IP law. "
-            f"Translate the following legal answer into natural, fluent '{target_lang}'. "
-            f"CRITICAL INSTRUCTIONS:\n"
-            f"1. Keep all statutory citations, Act/Treaty names, and section/rule numbers in English/untranslated.\n"
-            f"2. Translate the legal explanation accurately into natural, fluent '{target_lang}'.\n"
-            f"3. Translate the disclaimer: 'This is informational guidance, not legal advice.'\n"
-            f"4. Output ONLY the translated text, no conversational filler or markdown fences."
-        )
-
-    res = get_completion(system_prompt=system_prompt, user_prompt=text, max_tokens=1024)
-    return res.get("text", text).strip()
+    return translate_answer_text(text, target_lang=target_lang)
 
 
 def detect_language(text: str) -> str:
@@ -640,38 +758,8 @@ def translate_to_english(text: str, source_lang: str) -> str:
 
 
 def translate_from_english(text: str, target_lang: str) -> str:
-    """Translates synthesized answer back to user's native language using Bhashini with LLM fallback."""
-    if target_lang == "en":
-        return text
-
-    # 1. Attempt Bhashini translation first
-    bhashini_result = bhashini_translate(text, source_lang="en", target_lang=target_lang)
-    if bhashini_result:
-        logger.info(f"[Translate from English] Translated using Bhashini API: 'en' -> '{target_lang}'")
-        return bhashini_result
-
-    # 2. Fallback to legal LLM translation (preserving citations)
-    logger.info(f"Translating final grounded answer from 'en' to '{target_lang}' via LLM fallback")
-    system_prompt = (
-        f"You are a legal translator specializing in Indian Ayurveda and IP law. "
-        f"Translate the following legal answer into the language corresponding to language code '{target_lang}'. "
-        f"CRITICAL INSTRUCTIONS:\n"
-        f"1. Keep all statutory citations, Act/Treaty names (e.g., 'Patents Act, 1970', 'Drugs and Cosmetics Act, 1940', 'Rule 158-B', 'Section 3(p)', 'Section 3(a)') and section/rule numbers in English/untranslated.\n"
-        f"2. Translate the legal explanation accurately into natural, fluent '{target_lang}'.\n"
-        f"3. Translate the disclaimer: 'This is informational guidance, not legal advice.'\n"
-        f"4. Output ONLY the translated text, no conversational filler or markdown fences."
-    )
-    try:
-        res = get_completion(
-            system_prompt=system_prompt,
-            user_prompt=text,
-            max_tokens=1024,
-        )
-        translated = res.get("text", "").strip()
-        return translated if translated else text
-    except Exception as e:
-        logger.error(f"Translation from English failed: {e}")
-        return text
+    """Translates synthesized answer back to target language using Bhashini with LLM fallback."""
+    return translate_answer_text(text, target_lang=target_lang)
 
 
 def is_formulation_specific_query(query: str) -> bool:
@@ -702,6 +790,20 @@ def is_formulation_specific_query(query: str) -> bool:
         r"explain\s+article",
     ]
     for pattern in statutory_patterns:
+        if re.search(pattern, q):
+            return False
+
+    # Patentability / prior-art queries are direct legal questions under Section 3(p) / Patents Act,
+    # NOT regulatory manufacturing licensing questionnaires under the D&C Act
+    patent_statutory_patterns = [
+        r"can\s+(?:someone|anyone|others|a\s+company|third\s+parties?)\s+(?:else\s+)?(?:obtain\s+(?:a\s+)?|get\s+(?:a\s+)?)?patent",
+        r"can\s+(?:this|it|a\s+recipe|my\s+recipe|a\s+classical)\s+be\s+patented",
+        r"is\s+(?:this|it|a\s+recipe|a\s+classical|traditional\s+knowledge)\s+patentable",
+        r"patentability",
+        r"prior\s*art",
+        r"protect\s+(?:it\s+)?from\s+others\s+patenting",
+    ]
+    for pattern in patent_statutory_patterns:
         if re.search(pattern, q):
             return False
 
@@ -1342,9 +1444,128 @@ async def list_feedback_endpoint(limit: int = 50) -> Dict[str, Any]:
     return {"feedback": logs, "count": len(logs)}
 
 
-@router.post("/ask", tags=["Assistant"])
-async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
-    """Grounded RAG inquiry endpoint with query validation, FP16 reranker, stage timing, and translation."""
+class ABSComplianceRequest(BaseModel):
+    """Payload for dedicated ABS compliance decision flow evaluation."""
+    query: Optional[str] = Field(default="", description="User query or factual context")
+    answers: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="User answers to decision questions (is_sourced_from_india, is_commercial_use, is_foreign_entity)",
+    )
+
+
+@router.post("/compliance/abs", tags=["Compliance"])
+async def abs_compliance_endpoint(req: ABSComplianceRequest) -> Dict[str, Any]:
+    """Dedicated endpoint for Access & Benefit-Sharing (ABS) compliance under Biological Diversity Act 2002/2023."""
+    return process_abs_decision_flow(query=req.query or "", user_answers=req.answers)
+
+
+class TKDLPointerRequest(BaseModel):
+    """Payload for dedicated TKDL prior-art pointer query."""
+    query: str = Field(..., description="User query or formulation description")
+    classification: Optional[str] = Field(default=None, description="Formulation classification if known")
+
+
+@router.post("/compliance/tkdl", tags=["Compliance"])
+async def tkdl_pointer_endpoint(req: TKDLPointerRequest) -> Dict[str, Any]:
+    """Dedicated endpoint for Traditional Knowledge Digital Library (TKDL) prior-art pointer."""
+    return build_tkdl_pointer_payload(query=req.query, classification=req.classification)
+
+
+@router.post("/compliance/case-study", tags=["Compliance"])
+async def case_study_endpoint(req: TKDLPointerRequest) -> Dict[str, Any]:
+    """Dedicated endpoint for Neem and Turmeric historical biopiracy patent revocation case studies."""
+    payload = get_case_study_payload(query=req.query, classification=req.classification)
+    if payload:
+        return payload
+    return {
+        "triggered": False,
+        "message": "Query does not involve classical formulation patentability or traditional knowledge biopiracy.",
+    }
+
+
+class TranslateRequest(BaseModel):
+    """Payload for on-demand translation of legal answer text."""
+    answer_text: str = Field(..., description="Legal answer text to translate")
+    citations: Optional[List[Any]] = Field(default_factory=list, description="Statutory citations (remain untranslated)")
+    target_language: str = Field(..., description="Target language: 'en', 'hi', 'pa', 'ml', 'ta' or language names")
+
+
+@router.post("/translate", tags=["Translation"])
+async def translate_endpoint(req: TranslateRequest) -> Dict[str, Any]:
+    """Translates legal answer text on demand into one of the 5 supported languages while keeping citations untouched."""
+    if not req.answer_text or not req.answer_text.strip():
+        raise HTTPException(status_code=400, detail="answer_text cannot be empty.")
+
+    target_code, lang_meta = resolve_target_language(req.target_language)
+
+    # Translate only the answer text (citations strictly preserved)
+    translated_text = translate_answer_text(req.answer_text, target_code)
+
+    return {
+        "translated_text": translated_text,
+        "target_language": target_code,
+        "language_name": lang_meta["name"],
+        "script": lang_meta["script"],
+        "citations": req.citations or [],
+    }
+
+
+SIMPLIFY_SYSTEM_PROMPT = (
+    "Rewrite this legal answer in plain, everyday language a non-lawyer could understand. "
+    "Keep every citation exactly as given — do not add, remove, or change any citation. "
+    "Do not soften or omit the legal conclusion, only simplify the phrasing. "
+    "Avoid legal jargon like 'aggregation', 'inventive step', 'traditional knowledge exclusion' — use everyday equivalents."
+)
+
+
+def simplify_answer_text(text: str) -> str:
+    """Rewrites legal answer text in plain, everyday language for non-lawyers while strictly preserving citations."""
+    if not text or not text.strip():
+        return text
+
+    logger.info("[Simplify] Rewriting legal answer text in plain everyday language via LLM")
+    try:
+        res = get_completion(
+            system_prompt=SIMPLIFY_SYSTEM_PROMPT,
+            user_prompt=text.strip(),
+            max_tokens=1024,
+        )
+        simplified = res.get("text", "").strip()
+        # Strip surrounding markdown code blocks or triple quotes if present
+        if simplified.startswith("```") and simplified.endswith("```"):
+            simplified = re.sub(r"^```(?:markdown)?\n?", "", simplified)
+            simplified = re.sub(r"\n?```$", "", simplified).strip()
+        if (simplified.startswith('"""') and simplified.endswith('"""')) or (simplified.startswith("'''") and simplified.endswith("'''")):
+            simplified = simplified[3:-3].strip()
+        return simplified if simplified else text
+    except Exception as e:
+        logger.error(f"[Simplify] LLM simplification failed: {e}")
+        return text
+
+
+class SimplifyRequest(BaseModel):
+    """Payload for plain-language simplification of legal answer text."""
+    answer_text: str = Field(..., description="Legal answer text to simplify")
+    citations: Optional[List[Any]] = Field(default_factory=list, description="Statutory citations (remain unchanged)")
+
+
+@router.post("/simplify", tags=["Translation"])
+async def simplify_endpoint(req: SimplifyRequest) -> Dict[str, Any]:
+    """Rewrites legal answer text in plain, everyday language for non-lawyers while strictly preserving citations."""
+    if not req.answer_text or not req.answer_text.strip():
+        raise HTTPException(status_code=400, detail="answer_text cannot be empty.")
+
+    simplified_text = simplify_answer_text(req.answer_text)
+
+    return {
+        "simplified_text": simplified_text,
+        "simplified_answer": simplified_text,
+        "citations": req.citations or [],
+    }
+
+
+def execute_ask_pipeline(request: AskRequest) -> Dict[str, Any]:
+    """Execute synchronous full RAG pipeline for a single jurisdiction."""
     t_start = time.perf_counter()
     conversation_id = request.conversation_id or str(uuid.uuid4())
     store = get_default_session_store()
@@ -1417,6 +1638,14 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
             "timing_ms": timing_data,
         }
 
+    # 1.8 Dedicated ABS Compliance Trigger & Flow Check (Prompt 1)
+    abs_flow_result = None
+    if detect_abs_trigger(search_query) or bool(request.abs_answers):
+        abs_flow_result = process_abs_decision_flow(query=search_query, user_answers=request.abs_answers)
+
+    # 1.9 Dedicated TKDL Prior-Art Pointer Trigger Check (evaluated after classification)
+    tkdl_pointer_result = None
+
     # 2. Gated formulation classification check
     should_classify = bool(request.formulation_answers) or is_formulation_specific_query(search_query)
 
@@ -1445,12 +1674,22 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
                 "question": next_question,
                 "language": detected_lang,
                 "conversation_id": conversation_id,
+                "abs_compliance": abs_flow_result,
+                "tkdl_pointer": tkdl_pointer_result,
             }
         formulation_type = classify_formulation(request.formulation_answers)
         classification_citation = CLASSIFICATION_CITATIONS.get(formulation_type, "")
     else:
-        formulation_type = "general_statutory"
-        classification_citation = "General Statutory Interpretation"
+        if is_classical_formulation_query(search_query):
+            formulation_type = "classical_medicine"
+            classification_citation = "Classical Ayurvedic Formulation / Traditional Knowledge (First Schedule / Section 3(p))"
+        else:
+            formulation_type = "general_statutory"
+            classification_citation = "General Statutory Interpretation"
+
+    # 2.2 Dedicated TKDL Prior-Art Pointer Check (Prompt 2)
+    if tkdl_pointer_result is None and detect_tkdl_trigger(search_query, formulation_type):
+        tkdl_pointer_result = build_tkdl_pointer_payload(search_query, formulation_type)
 
     # 2.5 Retrieve prior conversation memory context & contextualize retrieval query
     memory_context, last_turn = get_memory_context(conversation_id)
@@ -1472,7 +1711,7 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
             "Escalation to a qualified human IP facilitator is recommended. "
             "This is informational guidance, not legal advice."
         )
-        final_answer = translate_from_english(abstention_en, target_lang=detected_lang)
+        final_answer = abstention_en
         store.add_message(conversation_id, {
             "role": "assistant",
             "content": final_answer,
@@ -1509,6 +1748,8 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
             "abstained": True,
             "language": detected_lang,
             "conversation_id": conversation_id,
+            "abs_compliance": abs_flow_result,
+            "tkdl_pointer": tkdl_pointer_result,
         }
 
     # 5. Build user prompt combining history + query + retrieved context chunks
@@ -1552,19 +1793,37 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
 
     # 6. Call LLM completion (Groq primary with Mistral fallback)
     t_llm_s = time.perf_counter()
-    completion_res = get_completion(
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        max_tokens=1024,
-    )
-    t_llm_ms = (time.perf_counter() - t_llm_s) * 1000
-    raw_text = completion_res.get("text", "")
-    provider_used = completion_res.get("provider_used", "unknown")
+    try:
+        completion_res = get_completion(
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            max_tokens=1024,
+        )
+        t_llm_ms = (time.perf_counter() - t_llm_s) * 1000
+        raw_text = completion_res.get("text", "")
+        provider_used = completion_res.get("provider_used", "unknown")
+        parsed = _clean_and_parse_json(raw_text)
+        raw_answer = parsed.get("answer", raw_text)
+    except Exception as llm_err:
+        t_llm_ms = (time.perf_counter() - t_llm_s) * 1000
+        logger.error(f"[LLM Error] Pipeline LLM call failed: {llm_err}", exc_info=True)
+        provider_used = "error_fallback"
+        raw_answer = (
+            "Due to temporary upstream model rate limits, direct natural-language synthesis could not be completed. "
+            "However, relevant statutory sources were verified and retrieved from the legal corpus below."
+        )
+        parsed = {
+            "answer": raw_answer,
+            "citations": [
+                {"source": c.get("title", ""), "section": c.get("section", "")}
+                for c in chunks[:3]
+            ],
+            "confidence": "low",
+            "abstained": False,
+        }
 
-    # 7. Parse LLM JSON output & translate back if non-English
-    parsed = _clean_and_parse_json(raw_text)
-    raw_answer = parsed.get("answer", raw_text)
-    final_answer = translate_from_english(raw_answer, target_lang=detected_lang)
+    # 7. Final synthesized answer returned in natural generated language (on-demand translation available via POST /translate)
+    final_answer = raw_answer
     t_total_ms = (time.perf_counter() - t_start) * 1000
 
     timing_info = {
@@ -1623,6 +1882,87 @@ async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
         "provider_used": provider_used,
         "conversation_id": conversation_id,
         "timing_ms": timing_info,
+        "abs_compliance": abs_flow_result,
+        "tkdl_pointer": tkdl_pointer_result,
+        "case_study": tkdl_pointer_result.get("case_study") if tkdl_pointer_result else None,
+    }
+
+
+@router.post("/ask", tags=["Assistant"])
+async def ask_endpoint(request: AskRequest) -> Dict[str, Any]:
+    """Grounded RAG inquiry endpoint with query validation, FP16 reranker, stage timing, and translation."""
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty or whitespace-only.")
+    return await asyncio.to_thread(execute_ask_pipeline, request)
+
+
+class AskCompareRequest(BaseModel):
+    """Payload for comparing a query across National and International jurisdictions."""
+    query: str = Field(..., description="User query to evaluate across jurisdictions")
+    conversation_id: Optional[str] = Field(default=None, description="Optional session conversation ID")
+    formulation_answers: Dict[str, Any] = Field(default_factory=dict, description="Pre-answered classification inputs")
+    history: List[Dict[str, Any]] = Field(default_factory=list, description="Optional prior conversation turns")
+
+
+@router.post("/ask/compare", tags=["Assistant"])
+async def ask_compare_endpoint(request: AskCompareRequest) -> Dict[str, Any]:
+    """Dual-jurisdiction comparative inquiry endpoint running National and International pipelines in parallel."""
+    t_start = time.perf_counter()
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty or whitespace-only.")
+
+    cid_base = request.conversation_id or str(uuid.uuid4())
+    req_nat = AskRequest(
+        query=request.query,
+        jurisdiction="national",
+        conversation_id=f"{cid_base}_nat",
+        formulation_answers=request.formulation_answers,
+        history=request.history,
+    )
+    req_int = AskRequest(
+        query=request.query,
+        jurisdiction="international",
+        conversation_id=f"{cid_base}_int",
+        formulation_answers=request.formulation_answers,
+        history=request.history,
+    )
+
+    # Run both pipelines simultaneously in worker threads for true non-blocking parallel execution
+    national_res, international_res = await asyncio.gather(
+        asyncio.to_thread(execute_ask_pipeline, req_nat),
+        asyncio.to_thread(execute_ask_pipeline, req_int),
+    )
+
+    t_total_ms = (time.perf_counter() - t_start) * 1000
+
+    # Compute cross-jurisdiction citation source overlap with canonical punctuation/whitespace normalization
+    def canonical_source(s: str) -> str:
+        # Strip punctuation, lowercase, and collapse multiple whitespaces
+        cleaned = re.sub(r"[^\w\s]", "", str(s).lower())
+        return " ".join(cleaned.split())
+
+    nat_canonical = {
+        canonical_source(c.get("source", "")): c.get("source", "").strip()
+        for c in national_res.get("citations", [])
+        if c.get("source") and canonical_source(c.get("source", ""))
+    }
+    int_canonical = {
+        canonical_source(c.get("source", "")): c.get("source", "").strip()
+        for c in international_res.get("citations", [])
+        if c.get("source") and canonical_source(c.get("source", ""))
+    }
+    shared_canonical_keys = set(nat_canonical.keys()).intersection(set(int_canonical.keys()))
+    shared_sources = [nat_canonical[k] for k in shared_canonical_keys]
+
+    return {
+        "query": request.query,
+        "conversation_id": cid_base,
+        "national": national_res,
+        "international": international_res,
+        "shared_citations_count": len(shared_sources),
+        "shared_sources": shared_sources,
+        "is_zero_overlap": len(shared_sources) == 0,
+        "latency_ms": round(t_total_ms, 2),
     }
 
 
@@ -1657,6 +1997,16 @@ async def ask_stream_endpoint(request: AskRequest):
                 yield f"data: {json.dumps({'stage': 'translating_query', 'message': f'Translating inquiry from {detected_lang} to English...'})}\n\n"
                 await asyncio.sleep(0.002)
             search_query = translate_to_english(request.query, source_lang=detected_lang)
+
+            # Stage 2.2: ABS Compliance Trigger & Flow Check (Prompt 1)
+            abs_flow_result = None
+            if detect_abs_trigger(search_query) or bool(request.abs_answers):
+                abs_flow_result = process_abs_decision_flow(query=search_query, user_answers=request.abs_answers)
+                yield f"data: {json.dumps({'stage': 'abs_compliance', 'data': abs_flow_result})}\n\n"
+                await asyncio.sleep(0.002)
+
+            # Stage 2.3: Dedicated TKDL Prior-Art Pointer Trigger Check (evaluated after classification)
+            tkdl_pointer_result = None
 
             # Stage 2.5: Check for Conversational Translation Follow-up
             trans_followup = parse_translation_followup(request.query, request.history, search_query)
@@ -1780,6 +2130,8 @@ async def ask_stream_endpoint(request: AskRequest):
                         "question": next_question,
                         "language": detected_lang,
                         "conversation_id": conversation_id,
+                        "abs_compliance": abs_flow_result,
+                        "tkdl_pointer": tkdl_pointer_result,
                     }
                     yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
                     await asyncio.sleep(0.002)
@@ -1788,8 +2140,18 @@ async def ask_stream_endpoint(request: AskRequest):
                 formulation_type = classify_formulation(request.formulation_answers)
                 classification_citation = CLASSIFICATION_CITATIONS.get(formulation_type, "")
             else:
-                formulation_type = "general_statutory"
-                classification_citation = "General Statutory Interpretation"
+                if is_classical_formulation_query(search_query):
+                    formulation_type = "classical_medicine"
+                    classification_citation = "Classical Ayurvedic Formulation / Traditional Knowledge (First Schedule / Section 3(p))"
+                else:
+                    formulation_type = "general_statutory"
+                    classification_citation = "General Statutory Interpretation"
+
+            # Stage 3.5: Dedicated TKDL Prior-Art Pointer Check (Prompt 2)
+            if tkdl_pointer_result is None and detect_tkdl_trigger(search_query, formulation_type):
+                tkdl_pointer_result = build_tkdl_pointer_payload(search_query, formulation_type)
+                yield f"data: {json.dumps({'stage': 'tkdl_pointer', 'data': tkdl_pointer_result})}\n\n"
+                await asyncio.sleep(0.002)
 
             # Stage 4: Fast FP16 Legal Retrieval
             t_ret_s = time.perf_counter()
@@ -1847,6 +2209,8 @@ async def ask_stream_endpoint(request: AskRequest):
                     "abstained": True,
                     "language": detected_lang,
                     "conversation_id": conversation_id,
+                    "abs_compliance": abs_flow_result,
+                    "tkdl_pointer": tkdl_pointer_result,
                 }
                 yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
                 await asyncio.sleep(0.002)
@@ -1919,40 +2283,8 @@ async def ask_stream_endpoint(request: AskRequest):
             parsed = _clean_and_parse_json(raw_text)
             raw_answer = parsed.get("answer", raw_text)
 
-            # Stage 7: Native Language Translation (if non-English)
-            if detected_lang != "en":
-                yield f"data: {json.dumps({'stage': 'translating_answer', 'message': f'Translating explanation back to native language ({detected_lang})...'})}\n\n"
-                await asyncio.sleep(0.002)
-                # Check Bhashini first
-                bhashini_result = bhashini_translate(raw_answer, source_lang="en", target_lang=detected_lang)
-                if bhashini_result:
-                    final_answer = bhashini_result
-                    yield f"data: {json.dumps({'stage': 'llm_token', 'delta': final_answer, 'answer_delta': final_answer, 'is_translated': True})}\n\n"
-                    await asyncio.sleep(0.002)
-                else:
-                    # Stream LLM translation tokens
-                    collected_trans = []
-                    trans_sys_prompt = (
-                        f"You are a legal translator specializing in Indian Ayurveda and IP law. "
-                        f"Translate the following legal answer into the language corresponding to language code '{detected_lang}'. "
-                        f"CRITICAL INSTRUCTIONS:\n"
-                        f"1. Keep all statutory citations, Act/Treaty names (e.g., 'Patents Act, 1970', 'Drugs and Cosmetics Act, 1940', 'Rule 158-B', 'Section 3(p)', 'Section 3(a)') and section/rule numbers in English/untranslated.\n"
-                        f"2. Translate the legal explanation accurately into natural, fluent '{detected_lang}'.\n"
-                        f"3. Translate the disclaimer: 'This is informational guidance, not legal advice.'\n"
-                        f"4. Output ONLY the translated text, no conversational filler or markdown fences."
-                    )
-                    for chunk_item in stream_completion(
-                        system_prompt=trans_sys_prompt,
-                        user_prompt=raw_answer,
-                        max_tokens=1024,
-                    ):
-                        delta = chunk_item.get("delta", "")
-                        collected_trans.append(delta)
-                        yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': delta, 'is_translated': True})}\n\n"
-                        await asyncio.sleep(0.002)
-                    final_answer = "".join(collected_trans).strip() or raw_answer
-            else:
-                final_answer = raw_answer
+            # Answer is rendered in natural generated language (English); on-demand translation is available via POST /translate
+            final_answer = raw_answer
 
             t_total_ms = (time.perf_counter() - t_stream_start) * 1000
 
@@ -2011,6 +2343,9 @@ async def ask_stream_endpoint(request: AskRequest):
                 "provider_used": provider_used,
                 "conversation_id": conversation_id,
                 "timing_ms": timing_data,
+                "abs_compliance": abs_flow_result,
+                "tkdl_pointer": tkdl_pointer_result,
+                "case_study": tkdl_pointer_result.get("case_study") if tkdl_pointer_result else None,
             }
             yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
             await asyncio.sleep(0.002)

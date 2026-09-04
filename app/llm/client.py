@@ -1,6 +1,8 @@
 """Unified LLM Client with Groq primary and Mistral fallback with zero-backoff 429 failover."""
 
 import os
+import re
+import time
 import logging
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
@@ -156,9 +158,31 @@ def get_completion(
         }
     except Exception as groq_err:
         if _is_rate_limit_error(groq_err):
+            # Check if error specifies a short retry window (e.g. 10s TPM burst)
+            m = re.search(r"try again in (\d+\.?\d*)s", str(groq_err))
+            wait_s = float(m.group(1)) if m else 3.0
+            if wait_s <= 15.0:
+                retry_log = f"[RATE LIMIT RETRY] Groq 429 TPM burst: waiting {wait_s:.1f}s before retry..."
+                logger.warning(retry_log)
+                print(retry_log)
+                time.sleep(wait_s + 0.5)
+                try:
+                    text = _call_groq(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        max_tokens=max_tokens,
+                        model=groq_model,
+                    )
+                    return {
+                        "text": text,
+                        "provider_used": "groq",
+                    }
+                except Exception as retry_err:
+                    groq_err = retry_err
+
             rate_limit_msg = (
                 f"[RATE LIMIT FALLBACK] Groq 429 RateLimitError (TPM/RPM quota reached on free-tier: {groq_err}). "
-                f"ZERO backoff wait — immediately failing over to Mistral ({mistral_model})..."
+                f"Failing over to Mistral ({mistral_model})..."
             )
             logger.warning(rate_limit_msg)
             print(rate_limit_msg)
