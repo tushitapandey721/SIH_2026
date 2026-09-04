@@ -1,0 +1,32 @@
+[
+  {
+    "id": "TC-001",
+    "category": "Proprietary Medicine",
+    "jurisdiction": "national",
+    "question": "Can a modified formulation based on classical Ayurvedic herbs with an added novel excipient be patented in India?",
+    "expected_citations": [
+      "Section 3(p) of the Patents Act, 1970",
+      "Biological Diversity Act, 2002"
+    ],
+    "must_abstain": false
+  },
+  {
+    "id": "TC-002",
+    "category": "Phytopharmaceutical",
+    "jurisdiction": "national",
+    "question": "What regulatory requirements apply to phytopharmaceuticals under Schedule Y / New Drugs and Clinical Trials Rules?",
+    "expected_citations": [
+      "New Drugs and Clinical Trials Rules, 2019",
+      "Drugs and Cosmetics Rules, 1945 Rule 122E"
+    ],
+    "must_abstain": false
+  },
+  {
+    "id": "TC-003",
+    "category": "Unknown",
+    "jurisdiction": "international",
+    "question": "What is the secret Mars planetary patent law for traditional herbs?",
+    "expected_citations": [],
+    "must_abstain": true
+  }
+]

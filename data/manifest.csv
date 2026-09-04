@@ -1,0 +1,18 @@
+id,title,authority,category,jurisdiction,priority,document_type,year,filename,chunk_strategy,citation_prefix,update_frequency,official_url
+IND-PAT-001,Patents Act 1970,India Code,Patent,national,P0,Act,1970,"Patents Act, 1970.pdf",section,Patents Act S.,on_change,https://www.indiacode.nic.in/handle/123456789/1392
+IND-BIO-001,Biological Diversity (Amendment) Act 2023,India Code,ABS,national,P0,Act,2023,"Biological Diversity (Amendment) Act, 2023.pdf",section,BDA S.,on_change,https://www.indiacode.nic.in/handle/123456789/2056
+IND-BIO-002,Biological Diversity Rules 2024,NBA,ABS,national,P0,Rules,2024,"The Biological Diversity Rules, 2024.pdf",rule,BD Rules R.,on_change,http://nbaindia.org/
+IND-BIO-003,Biological Diversity (Amendment) Rules 2025,NBA,ABS,national,P0,Rules,2025,"The Biological Diversity (Amendment) Rules, 2025.pdf",rule,BD Amendment Rules R.,on_change,http://nbaindia.org/
+IND-DRUG-001,Drugs and Cosmetics Act 1940 and Rules 1945,CDSCO,Regulation,national,P0,Act+Rules,2016,2016DrugsandCosmeticsAct1940Rules1945.pdf,rule,D&C Rules R. / D&C Act S.,on_change,https://cdsco.gov.in/opencms/opencms/en/Acts-and-rules/
+IND-ADV-001,Drugs and Magic Remedies (Objectionable Advertisements) Act 1954,India Code,Advertising,national,P0,Act,1954,Drugs and Magic Remedies (Objectionable Advertisements) Act.pdf,section,DMR Act S.,on_change,https://www.indiacode.nic.in/handle/123456789/1429
+IND-FSSAI-001,Ayurveda Aahara Regulations 2022,FSSAI,Food,national,P0,Regulation,2022,Gazette_Notification_Ayurveda_Aahara.pdf,regulation,FSSAI Reg.,annual,https://www.fssai.gov.in/
+IND-AY-001,Phytopharmaceutical Drugs General Guidance for Development,Indian Pharmacopoeia Commission,Ayurveda,national,P0,Guideline,2025,29.08.2025_Phytopharmaceutical-Drugs-General-Guidance-for-Development.pdf,heading,IPC Phytopharma Guidance,annual,https://ipc.gov.in/
+IND-TM-001,Trade Marks Act 1999,India Code,Trademark,national,P0,Act,1999,"The Trade Marks Act, 1999.pdf",section,TM Act S.,on_change,https://www.indiacode.nic.in/handle/123456789/1993
+IND-CR-001,Copyright Act 1957,Copyright Office,Copyright,national,P0,Act,1957,"The Copyright Act, 1957.pdf",section,Copyright Act S.,on_change,https://copyright.gov.in/
+IND-GI-001,Geographical Indications of Goods (Registration and Protection) Act 1999,IP India,GI,national,P0,Act,1999,Geographical Indications of Goods.pdf,section,GI Act S.,on_change,https://ipindia.gov.in/geographical-indications.htm
+IND-DES-001,Designs Act 2000,IP India,Design,national,P0,Act,2000,"The Designs Act, 2000 (Act No. 16 of 2000).pdf",section,Designs Act S.,on_change,https://ipindia.gov.in/designs.htm
+INT-WTO-001,TRIPS Agreement,WTO,Treaty,international,P0,Treaty,1995,trips_agreement.pdf,article,TRIPS Art.,on_change,https://www.wto.org/english/docs_e/legal_e/27-trips_01_e.htm
+INT-CBD-001,Convention on Biological Diversity,CBD,Treaty,international,P0,Treaty,1992,Convention on Biological Diversity (CBD).pdf,article,CBD Art.,on_change,https://www.cbd.int/convention/text/
+INT-CBD-002,Nagoya Protocol,CBD,Treaty,international,P0,Treaty,2010,Nagoya Protocol.pdf,article,Nagoya Art.,on_change,https://www.cbd.int/abs/text/
+INT-WIPO-001,WIPO GRATK Treaty,WIPO,Treaty,international,P0,Treaty,2024,WIPO GRATK Treaty (2024).pdf,article,GRATK Art.,on_change,https://www.wipo.int/gratk/en/
+INT-WIPO-002,PCT Treaty,WIPO,Treaty,international,P0,Treaty,1970,PCT (Patent Cooperation Treaty).pdf,article,PCT Art.,on_change,https://www.wipo.int/pct/en/texts/

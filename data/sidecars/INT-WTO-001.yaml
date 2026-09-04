@@ -1,0 +1,7 @@
+id: INT-WTO-001
+title: TRIPS Agreement
+jurisdiction: international
+content_hash: 4cdf9015d8abc5820f05da472c5e15d2d8b7d9447e333d6486ea341e9bd67022
+total_chunks: 110
+extraction_method: native
+last_ingested_at: '2026-08-30T12:15:32.090800+00:00'
