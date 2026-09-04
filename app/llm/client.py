@@ -51,6 +51,10 @@ def _call_groq(
     # max_retries=0 disables internal exponential backoff so 429 raises immediately
     client = groq.Groq(api_key=api_key, max_retries=0)
 
+    extra_params = {}
+    if "gpt-oss" in model_name.lower():
+        extra_params["reasoning_effort"] = "low"
+
     response = client.chat.completions.create(
         model=model_name,
         messages=[
@@ -58,6 +62,7 @@ def _call_groq(
             {"role": "user", "content": user_prompt},
         ],
         max_tokens=max_tokens,
+        **extra_params,
     )
 
     if not response.choices:
@@ -205,14 +210,20 @@ def stream_completion(
         try:
             # max_retries=0 disables internal exponential backoff so 429 raises immediately
             client = groq.Groq(api_key=api_key, max_retries=0)
+            model_name = groq_model or DEFAULT_GROQ_MODEL
+            extra_params = {}
+            if "gpt-oss" in model_name.lower():
+                extra_params["reasoning_effort"] = "low"
+
             stream = client.chat.completions.create(
-                model=groq_model or DEFAULT_GROQ_MODEL,
+                model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=max_tokens,
                 stream=True,
+                **extra_params,
             )
             for chunk in stream:
                 delta = chunk.choices[0].delta.content if chunk.choices else None

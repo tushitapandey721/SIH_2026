@@ -413,6 +413,21 @@ export default function Home() {
             }
 
             // Real-time live token streaming into message bubble
+            if (eventJson.stage === "synthesis" || eventJson.stage === "translating_answer") {
+              if (!currentAssistantId) {
+                currentAssistantId = "stream-" + Date.now();
+                accumulatedContent = "";
+                const newAssistantMsg: Message = {
+                  id: currentAssistantId,
+                  role: "assistant",
+                  content: "",
+                  isStreaming: true,
+                  timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                };
+                setMessages((prev) => [...prev, newAssistantMsg]);
+              }
+            }
+
             if (eventJson.stage === "llm_token") {
               const textChunk =
                 eventJson.answer_delta !== undefined && eventJson.answer_delta !== null
@@ -854,21 +869,30 @@ export default function Home() {
                       {/* Top Badges */}
                       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/10 pb-3 mb-4">
                         <div className="flex items-center gap-2">
-                          {msg.classification && (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-medium uppercase tracking-wider">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                              {msg.classification.replace(/_/g, " ")}
+                          {msg.isStreaming ? (
+                            <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-mono tracking-wider">
+                              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                              Generating Verified Legal Response...
                             </span>
-                          )}
-                          {msg.classification_citation && (
-                            <span className="text-[11px] text-stone-400 font-mono hidden sm:inline">
-                              Basis: {msg.classification_citation}
-                            </span>
+                          ) : (
+                            <>
+                              {msg.classification && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-400/30 text-amber-300 text-xs font-medium uppercase tracking-wider">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
+                                  {msg.classification.replace(/_/g, " ")}
+                                </span>
+                              )}
+                              {msg.classification_citation && (
+                                <span className="text-[11px] text-stone-400 font-mono hidden sm:inline">
+                                  Basis: {msg.classification_citation}
+                                </span>
+                              )}
+                            </>
                           )}
                         </div>
 
                         {/* Confidence Badge */}
-                        {msg.confidence && !msg.needs_classification && (
+                        {!msg.isStreaming && msg.confidence && !msg.needs_classification && (
                           <div className="flex items-center gap-2">
                             {msg.language && (
                               <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-white/5 border border-amber-500/20 text-stone-300">
@@ -1047,97 +1071,99 @@ export default function Home() {
                       )}
 
                       {/* Footer Metadata & Language Action */}
-                      <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-500 font-mono">
-                        <div className="flex items-center gap-3">
-                          <span>
-                            {msg.provider_used && `Provider: ${msg.provider_used.toUpperCase()}`}
-                          </span>
-                          <span>{msg.timestamp}</span>
+                      {!msg.isStreaming && (
+                        <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-500 font-mono">
+                          <div className="flex items-center gap-3">
+                            <span>
+                              {msg.provider_used && `Provider: ${msg.provider_used.toUpperCase()}`}
+                            </span>
+                            <span>{msg.timestamp}</span>
 
-                          {/* Lightweight Feedback Signal (Prompt 3) */}
-                          {!msg.needs_classification && !msg.isError && msg.role === "assistant" && (
-                            <div className="flex items-center gap-1.5 ml-1 border-l border-white/10 pl-3">
-                              {feedbackState[msg.id]?.submitted ? (
-                                <span className="inline-flex items-center gap-1 text-[11px] text-amber-300/90 font-sans font-medium">
-                                  <CheckCircle2 className="w-3 h-3 text-amber-400" />
-                                  <span>{feedbackState[msg.id]?.rating === "up" ? "Helpful" : "Feedback recorded"}</span>
-                                </span>
+                            {/* Lightweight Feedback Signal (Prompt 3) */}
+                            {!msg.needs_classification && !msg.isError && msg.role === "assistant" && (
+                              <div className="flex items-center gap-1.5 ml-1 border-l border-white/10 pl-3">
+                                {feedbackState[msg.id]?.submitted ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] text-amber-300/90 font-sans font-medium">
+                                    <CheckCircle2 className="w-3 h-3 text-amber-400" />
+                                    <span>{feedbackState[msg.id]?.rating === "up" ? "Helpful" : "Feedback recorded"}</span>
+                                  </span>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleFeedback(msg.id, "up", undefined, msg.content, msg.citations)}
+                                      title="Helpful statutory response"
+                                      className={`p-1.5 rounded-lg border transition-all ${
+                                        feedbackState[msg.id]?.rating === "up"
+                                          ? "bg-amber-500/20 border-amber-400 text-amber-300"
+                                          : "border-white/10 hover:border-amber-400/40 hover:bg-amber-500/10 text-stone-400 hover:text-amber-300"
+                                      }`}
+                                    >
+                                      <ThumbsUp className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleFeedback(msg.id, "down", undefined, msg.content, msg.citations)}
+                                      title="Report issue or improvement"
+                                      className={`p-1.5 rounded-lg border transition-all ${
+                                        feedbackState[msg.id]?.rating === "down"
+                                          ? "bg-rose-500/20 border-rose-400 text-rose-300"
+                                          : "border-white/10 hover:border-rose-400/40 hover:bg-rose-500/10 text-stone-400 hover:text-rose-300"
+                                      }`}
+                                    >
+                                      <ThumbsDown className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {!msg.needs_classification && !msg.isError && (
+                            <div className="flex items-center gap-2">
+                              {msg.language === "hi" ? (
+                                <button
+                                  onClick={() => {
+                                    const userMsg: Message = {
+                                      id: Date.now().toString(),
+                                      role: "user",
+                                      content: "Convert the above response to English",
+                                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                                    };
+                                    const newMessages = [...messages, userMsg];
+                                    setMessages(newMessages);
+                                    sendQueryToBackend("Convert the above response to English", {}, jurisdiction, newMessages);
+                                  }}
+                                  disabled={isLoading}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
+                                >
+                                  <Globe2 className="w-3 h-3 text-amber-400" />
+                                  <span>Translate to English</span>
+                                </button>
                               ) : (
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleFeedback(msg.id, "up", undefined, msg.content, msg.citations)}
-                                    title="Helpful statutory response"
-                                    className={`p-1.5 rounded-lg border transition-all ${
-                                      feedbackState[msg.id]?.rating === "up"
-                                        ? "bg-amber-500/20 border-amber-400 text-amber-300"
-                                        : "border-white/10 hover:border-amber-400/40 hover:bg-amber-500/10 text-stone-400 hover:text-amber-300"
-                                    }`}
-                                  >
-                                    <ThumbsUp className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleFeedback(msg.id, "down", undefined, msg.content, msg.citations)}
-                                    title="Report issue or improvement"
-                                    className={`p-1.5 rounded-lg border transition-all ${
-                                      feedbackState[msg.id]?.rating === "down"
-                                        ? "bg-rose-500/20 border-rose-400 text-rose-300"
-                                        : "border-white/10 hover:border-rose-400/40 hover:bg-rose-500/10 text-stone-400 hover:text-rose-300"
-                                    }`}
-                                  >
-                                    <ThumbsDown className="w-3 h-3" />
-                                  </button>
-                                </div>
+                                <button
+                                  onClick={() => {
+                                    const userMsg: Message = {
+                                      id: Date.now().toString(),
+                                      role: "user",
+                                      content: "उपरोक्त उत्तर को हिंदी में अनुवाद करें",
+                                      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+                                    };
+                                    const newMessages = [...messages, userMsg];
+                                    setMessages(newMessages);
+                                    sendQueryToBackend("उपरोक्त उत्तर को हिंदी में अनुवाद करें", {}, jurisdiction, newMessages);
+                                  }}
+                                  disabled={isLoading}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
+                                >
+                                  <Globe2 className="w-3 h-3 text-amber-400" />
+                                  <span>हिंदी में अनुवाद करें (Hindi)</span>
+                                </button>
                               )}
                             </div>
                           )}
                         </div>
-
-                        {!msg.needs_classification && !msg.isError && (
-                          <div className="flex items-center gap-2">
-                            {msg.language === "hi" ? (
-                              <button
-                                onClick={() => {
-                                  const userMsg: Message = {
-                                    id: Date.now().toString(),
-                                    role: "user",
-                                    content: "Convert the above response to English",
-                                    timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                                  };
-                                  const newMessages = [...messages, userMsg];
-                                  setMessages(newMessages);
-                                  sendQueryToBackend("Convert the above response to English", {}, jurisdiction, newMessages);
-                                }}
-                                disabled={isLoading}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
-                              >
-                                <Globe2 className="w-3 h-3 text-amber-400" />
-                                <span>Translate to English</span>
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => {
-                                  const userMsg: Message = {
-                                    id: Date.now().toString(),
-                                    role: "user",
-                                    content: "उपरोक्त उत्तर को हिंदी में अनुवाद करें",
-                                    timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                                  };
-                                  const newMessages = [...messages, userMsg];
-                                  setMessages(newMessages);
-                                  sendQueryToBackend("उपरोक्त उत्तर को हिंदी में अनुवाद करें", {}, jurisdiction, newMessages);
-                                }}
-                                disabled={isLoading}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/10 hover:bg-amber-500/20 border border-amber-400/30 text-amber-300 text-[11px] font-sans font-medium transition-colors disabled:opacity-50"
-                              >
-                                <Globe2 className="w-3 h-3 text-amber-400" />
-                                <span>हिंदी में अनुवाद करें (Hindi)</span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       {/* Optional Thumbs-Down Reason / Comment Input Drawer */}
                       {!msg.needs_classification && !msg.isError && msg.role === "assistant" && feedbackState[msg.id]?.showCommentInput && (
@@ -1209,7 +1235,7 @@ export default function Home() {
             })}
 
             {/* REAL-TIME BACKEND SSE STAGE PROGRESS INDICATOR */}
-            {isLoading && (
+            {isLoading && !messages.some((m) => m.isStreaming) && (
               <div className="flex justify-start gap-3 items-start pr-8 animate-in fade-in duration-300">
                 <div className="w-9 h-9 rounded-xl bg-[#12100e] border border-amber-400/40 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(234,179,8,0.2)]">
                   <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />

@@ -1,5 +1,6 @@
 """FastAPI route handlers for IP-SAKTI Sahayak with Multilingual Translation, SSE Stage Streaming, Token Streaming, and Corpus Provenance."""
 
+import asyncio
 import csv
 import json
 import logging
@@ -1640,6 +1641,7 @@ async def ask_stream_endpoint(request: AskRequest):
         try:
             # Stage 1: Language Detection
             yield f"data: {json.dumps({'stage': 'detect_language', 'message': 'Detecting inquiry language...', 'conversation_id': conversation_id})}\n\n"
+            await asyncio.sleep(0.002)
             detected_lang = detect_language(request.query)
 
             # Persist user inquiry in session store
@@ -1653,6 +1655,7 @@ async def ask_stream_endpoint(request: AskRequest):
             # Stage 2: Query Translation (if non-English)
             if detected_lang != "en":
                 yield f"data: {json.dumps({'stage': 'translating_query', 'message': f'Translating inquiry from {detected_lang} to English...'})}\n\n"
+                await asyncio.sleep(0.002)
             search_query = translate_to_english(request.query, source_lang=detected_lang)
 
             # Stage 2.5: Check for Conversational Translation Follow-up
@@ -1660,6 +1663,7 @@ async def ask_stream_endpoint(request: AskRequest):
             if trans_followup is not None:
                 target_code, target_name, text_to_trans, prev_citations = trans_followup
                 yield f"data: {json.dumps({'stage': 'translating_answer', 'message': f'Translating previous legal response to {target_name}...'})}\n\n"
+                await asyncio.sleep(0.002)
                 t_trans_s = time.perf_counter()
 
                 if target_code == "en":
@@ -1694,6 +1698,7 @@ async def ask_stream_endpoint(request: AskRequest):
                     provider_used = chunk_item.get("provider", "groq")
                     collected_trans.append(delta)
                     yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': delta})}\n\n"
+                    await asyncio.sleep(0.002)
 
                 translated_answer = "".join(collected_trans).strip()
                 t_trans_ms = (time.perf_counter() - t_trans_s) * 1000
@@ -1742,6 +1747,7 @@ async def ask_stream_endpoint(request: AskRequest):
                     "timing_ms": timing_data,
                 }
                 yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
+                await asyncio.sleep(0.002)
                 return
 
             # Stage 3: Gated Formulation Classification
@@ -1749,6 +1755,7 @@ async def ask_stream_endpoint(request: AskRequest):
 
             if should_classify:
                 yield f"data: {json.dumps({'stage': 'classification_check', 'message': 'Verifying formulation classification tree...'})}\n\n"
+                await asyncio.sleep(0.002)
                 next_question = get_next_question(request.formulation_answers)
                 if next_question is not None:
                     t_total_ms = (time.perf_counter() - t_stream_start) * 1000
@@ -1775,6 +1782,7 @@ async def ask_stream_endpoint(request: AskRequest):
                         "conversation_id": conversation_id,
                     }
                     yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
+                    await asyncio.sleep(0.002)
                     return
 
                 formulation_type = classify_formulation(request.formulation_answers)
@@ -1788,6 +1796,7 @@ async def ask_stream_endpoint(request: AskRequest):
             memory_context, last_turn = get_memory_context(conversation_id)
             retrieval_query = contextualize_query_with_memory(search_query, last_turn, jurisdiction=request.jurisdiction)
             yield f"data: {json.dumps({'stage': 'retrieval', 'message': f'Searching {request.jurisdiction} statutory corpus & treaties (FP16 Accelerated)...'})}\n\n"
+            await asyncio.sleep(0.002)
             retrieval_res = retrieve(
                 query=retrieval_query,
                 jurisdiction=request.jurisdiction,
@@ -1840,10 +1849,12 @@ async def ask_stream_endpoint(request: AskRequest):
                     "conversation_id": conversation_id,
                 }
                 yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
+                await asyncio.sleep(0.002)
                 return
 
             # Stage 5: Context Formatting
             yield f"data: {json.dumps({'stage': 'reranking', 'message': 'Cross-Encoder semantic reranking complete...'})}\n\n"
+            await asyncio.sleep(0.002)
             context_lines = []
             for idx, c in enumerate(chunks, start=1):
                 source_title = c.get("title", "Statutory Source")
@@ -1885,6 +1896,7 @@ async def ask_stream_endpoint(request: AskRequest):
             # Stage 6: Grounded Synthesis with Live Incremental LLM Streaming
             t_llm_s = time.perf_counter()
             yield f"data: {json.dumps({'stage': 'synthesis', 'message': 'Synthesizing verified statutory answer with citations...'})}\n\n"
+            await asyncio.sleep(0.002)
             collected_chunks = []
             provider_used = "groq"
             extractor = IncrementalAnswerExtractor()
@@ -1899,6 +1911,7 @@ async def ask_stream_endpoint(request: AskRequest):
                 collected_chunks.append(delta)
                 answer_delta = extractor.feed(delta)
                 yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': answer_delta})}\n\n"
+                await asyncio.sleep(0.002)
 
             raw_text = "".join(collected_chunks)
             t_llm_ms = (time.perf_counter() - t_llm_s) * 1000
@@ -1909,11 +1922,13 @@ async def ask_stream_endpoint(request: AskRequest):
             # Stage 7: Native Language Translation (if non-English)
             if detected_lang != "en":
                 yield f"data: {json.dumps({'stage': 'translating_answer', 'message': f'Translating explanation back to native language ({detected_lang})...'})}\n\n"
+                await asyncio.sleep(0.002)
                 # Check Bhashini first
                 bhashini_result = bhashini_translate(raw_answer, source_lang="en", target_lang=detected_lang)
                 if bhashini_result:
                     final_answer = bhashini_result
                     yield f"data: {json.dumps({'stage': 'llm_token', 'delta': final_answer, 'answer_delta': final_answer, 'is_translated': True})}\n\n"
+                    await asyncio.sleep(0.002)
                 else:
                     # Stream LLM translation tokens
                     collected_trans = []
@@ -1934,6 +1949,7 @@ async def ask_stream_endpoint(request: AskRequest):
                         delta = chunk_item.get("delta", "")
                         collected_trans.append(delta)
                         yield f"data: {json.dumps({'stage': 'llm_token', 'delta': delta, 'answer_delta': delta, 'is_translated': True})}\n\n"
+                        await asyncio.sleep(0.002)
                     final_answer = "".join(collected_trans).strip() or raw_answer
             else:
                 final_answer = raw_answer
@@ -1997,9 +2013,20 @@ async def ask_stream_endpoint(request: AskRequest):
                 "timing_ms": timing_data,
             }
             yield f"data: {json.dumps({'stage': 'complete', 'data': final_payload})}\n\n"
+            await asyncio.sleep(0.002)
 
         except Exception as e:
             logger.error(f"Stream generation error: {e}", exc_info=True)
             yield f"data: {json.dumps({'stage': 'error', 'error': str(e)})}\n\n"
+            await asyncio.sleep(0.002)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+            "X-Accel-Buffering": "no",
+        },
+    )
