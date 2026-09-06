@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: ip-sakti-sahayak-backend
+    runtime: python
+    plan: starter # Starter plan (2GB RAM) recommended for BGE-M3 neural models
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: APP_HOST
+        value: 0.0.0.0
+      - key: DATABASE_PATH
+        value: ./data/ip_sakti.db
+      - key: QDRANT_PATH
+        value: ./qdrant_data
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: BHASHINI_API_KEY
+        sync: false
+      - key: BHASHINI_USER_ID
+        sync: false
