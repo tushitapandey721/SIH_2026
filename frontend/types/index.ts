@@ -20,6 +20,7 @@ export interface VerificationAnchor {
   official_url?: string;
   text_excerpt?: string;
   status?: string;
+  match_score?: number;
 }
 
 export interface RankedDocumentItem {
