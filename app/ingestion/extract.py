@@ -208,11 +208,14 @@ def extract_document(path: str | Path) -> Tuple[str, str]:
 
 
 def locate_corpus_file(filename: str, base_dir: Optional[str | Path] = None) -> Optional[Path]:
-    """Helper to locate a corpus file across national and international folders."""
+    """Helper to locate a corpus file across national and international folders, as well as DB folder."""
     base = Path(base_dir) if base_dir else Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
+    db_dir = Path(__file__).resolve().parent.parent.parent / "DB"
     candidates = [
         base / "national" / filename,
         base / "international" / filename,
+        db_dir / filename,
+        base / filename,
     ]
 
     for candidate in candidates:
@@ -220,11 +223,13 @@ def locate_corpus_file(filename: str, base_dir: Optional[str | Path] = None) -> 
             return candidate
 
     clean_target = filename.lower().replace("_", " ").replace("-", " ")
-    for p in base.rglob("*.pdf"):
-        if p.name.lower() == filename.lower():
-            return p
-        p_clean = p.name.lower().replace("_", " ").replace("-", " ")
-        if clean_target in p_clean or p_clean in clean_target:
-            return p
+    for search_dir in [base, db_dir]:
+        if search_dir.exists():
+            for p in search_dir.rglob("*.pdf"):
+                if p.name.lower() == filename.lower():
+                    return p
+                p_clean = p.name.lower().replace("_", " ").replace("-", " ")
+                if clean_target in p_clean or p_clean in clean_target:
+                    return p
 
     return None

@@ -63,7 +63,7 @@ LEGAL_CONCEPT_EXPANSIONS = [
         "Rule 161 Rule 161A Part XVII Drugs and Cosmetics Rules labelling packing particulars ingredients botanical names container Ayurvedic Siddha Unani",
     ),
     (
-        re.compile(r"(?i)\b(rule\s+158b?|difference\s+between\s+classical\s+and\s+proprietary|licens(?:e|ing)\s+requirements|asu\s+drug\s+licen[sc]e|first\s+schedule|ayurvedic\s+drug\s+licen[sc]e)\b"),
+        re.compile(r"(?i)\b(rule\s+158b?|difference\s+between\s+classical\s+and\s+proprietary|licens(?:e|ing)\s+requirements|asu\s+drug\s+licen[sc]e|manufacturing\s+licen[sc]e|drug\s+licen[sc]e|first\s+schedule\s+books)\b"),
         "Rule 158B First Schedule authoritative books classical formulation patent or proprietary ASU medicine Section 3(h)",
     ),
     (
@@ -91,24 +91,24 @@ LEGAL_CONCEPT_EXPANSIONS = [
 
     # 5. International Treaties (Nagoya Protocol, TRIPS, PCT, WIPO GRATK, CBD)
     (
-        re.compile(r"(?i)\b(prior\s+informed\s+consent|pic|mutually\s+agreed\s+terms|mat|nagoya\s+protocol|article\s+6\s+of\s+the\s+nagoya)\b"),
-        "Article 6 Article 5 Nagoya Protocol Prior Informed Consent Mutually Agreed Terms Access to Genetic Resources",
+        re.compile(r"(?i)\b(article\s+6\b|access\s+to\s+genetic\s+resources|pic|prior\s+informed\s+consent|mutually\s+agreed\s+terms|mat|nagoya\s+protocol|nagoya)\b"),
+        "Article 6 Article 5 Article 7 Nagoya Protocol Access to Genetic Resources Prior Informed Consent PIC Mutually Agreed Terms MAT benefit-sharing sovereign rights",
     ),
     (
-        re.compile(r"(?i)\b(trips\s+agreement|trips\s+article\s+27|patentable\s+subject\s+matter)\b"),
-        "Article 27 TRIPS Agreement patentable subject matter novelty inventive step micro-organisms",
+        re.compile(r"(?i)\b(trips|trips\s+agreement|article\s+27|patentable\s+subject\s+matter|plant\s+varieties|micro[\s-]organisms?|sui\s+generis)\b"),
+        "Article 27 Article 27(1) Article 27(3)(b) TRIPS Agreement patentable subject matter novelty inventive step micro-organisms plant varieties sui generis",
     ),
     (
-        re.compile(r"(?i)\b(claiming\s+priority|priority\s+claim|patent\s+cooperation\s+treaty|pct\s+article\s+8|international\s+application)\b"),
-        "Article 8 PCT Treaty Claiming Priority international application time limit Paris Convention",
+        re.compile(r"(?i)\b(pct|patent\s+cooperation\s+treaty|claiming\s+priority|priority\s+claim|international\s+application|pct\s+article\s+8|international\s+search\s+report)\b"),
+        "Article 8 Article 11 Article 19 PCT Treaty Claiming Priority international application filing date time limit Paris Convention",
     ),
     (
-        re.compile(r"(?i)\b(mandatory\s+disclosure|wipo\s+treat(?:y|ies)|gratk|genetic\s+resources\s+and\s+associated\s+traditional\s+knowledge)\b"),
-        "Article 3 WIPO GRATK Treaty mandatory disclosure country of origin genetic resources traditional knowledge",
+        re.compile(r"(?i)\b(mandatory\s+disclosure|wipo|gratk|genetic\s+resources\s+and\s+associated\s+traditional\s+knowledge|country\s+of\s+origin\s+disclosure|gratk\s+article\s+3|disclosure\s+requirements?)\b"),
+        "Article 3 Article 4 Article 5 WIPO GRATK Treaty mandatory disclosure requirement country of origin source genetic resources traditional knowledge patent application",
     ),
     (
-        re.compile(r"(?i)\b(convention\s+on\s+biological\s+diversity|cbd|sovereign\s+rights|fair\s+benefit\s+sharing)\b"),
-        "Article 15 Convention on Biological Diversity sovereign rights Access to Genetic Resources fair and equitable sharing",
+        re.compile(r"(?i)\b(cbd|convention\s+on\s+biological\s+diversity|sovereign\s+rights|fair\s+benefit\s+sharing|cbd\s+article\s+15|ex[\s-]situ\s+conservation|in[\s-]situ\s+conservation)\b"),
+        "Article 15 Article 8(j) Article 19 Convention on Biological Diversity CBD sovereign rights Access to Genetic Resources prior informed consent fair and equitable sharing of benefits",
     ),
 
     # 6. Trade Marks, Geographical Indications, and Advertising

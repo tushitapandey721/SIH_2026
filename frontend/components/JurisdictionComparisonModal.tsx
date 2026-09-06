@@ -12,8 +12,9 @@ import {
   FileText,
   ExternalLink,
 } from "lucide-react";
-import { JurisdictionComparisonData, Citation } from "../types";
+import { JurisdictionComparisonData } from "../types";
 import { getCitationPdfUrl } from "../lib/constants";
+import { VerificationProofCard } from "./VerificationProofCard";
 
 interface JurisdictionComparisonModalProps {
   comparisonData: JurisdictionComparisonData;
@@ -186,6 +187,14 @@ export const JurisdictionComparisonModal: React.FC<JurisdictionComparisonModalPr
             ) : (
               <p className="text-xs text-stone-500 italic">No national statutory citations recorded.</p>
             )}
+
+            {/* National Verification & Ranked Docs Audit */}
+            <VerificationProofCard
+              proof={cmp.national.verification_proof}
+              citations={cmp.national.citations}
+              timing_ms={cmp.national.timing_ms}
+              provider_used={cmp.national.provider_used}
+            />
           </div>
         </div>
 
@@ -294,6 +303,14 @@ export const JurisdictionComparisonModal: React.FC<JurisdictionComparisonModalPr
             ) : (
               <p className="text-xs text-stone-500 italic">No international treaty citations recorded.</p>
             )}
+
+            {/* International Verification & Ranked Docs Audit */}
+            <VerificationProofCard
+              proof={cmp.international.verification_proof}
+              citations={cmp.international.citations}
+              timing_ms={cmp.international.timing_ms}
+              provider_used={cmp.international.provider_used}
+            />
           </div>
         </div>
       </div>

@@ -267,7 +267,7 @@ export const ABSComplianceCard: React.FC<ABSComplianceCardProps> = ({
             </div>
             {absData.result.exact_statutory_text && (
               <p className="text-[11px] text-stone-400 leading-relaxed font-light italic pt-1 border-t border-emerald-500/10">
-                "{absData.result.exact_statutory_text}"
+                &ldquo;{absData.result.exact_statutory_text}&rdquo;
               </p>
             )}
           </div>

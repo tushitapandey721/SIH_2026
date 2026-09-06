@@ -27,10 +27,10 @@ logger = logging.getLogger("IP-SAKTI.Retriever")
 DENSE_TOP_K = 30
 BM25_TOP_K = 20
 RRF_K = 60
-FUSED_TOP_K = 8
+FUSED_TOP_K = 25
 RERANK_TOP_K = 5
-RERANK_MAX_LENGTH = 192
-RERANK_BATCH_SIZE = 8
+RERANK_MAX_LENGTH = 512
+RERANK_BATCH_SIZE = 16
 BM25_CACHE_FILENAME = "bm25_cache.pkl.gz"
 
 
@@ -332,7 +332,7 @@ class LegalRetriever:
         pairs = []
         for c in selected_candidates:
             doc_context = f"{c.get('title', '')} {c.get('citation_prefix', '')} {c.get('section', '')}: {c.get('text', '')}"
-            pairs.append([expanded_query, doc_context[:750]])
+            pairs.append([norm_query if norm_query else query, doc_context[:750]])
 
         t0 = time.perf_counter()
         with torch.inference_mode():

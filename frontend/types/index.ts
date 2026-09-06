@@ -6,6 +6,69 @@ export interface Citation {
   official_url?: string;
   pdf_filename?: string;
   page_number?: number;
+  text_excerpt?: string;
+  match_score?: number;
+  verified?: boolean;
+}
+
+export interface VerificationAnchor {
+  source: string;
+  section: string;
+  page_number?: number;
+  pdf_filename?: string;
+  pdf_url?: string;
+  official_url?: string;
+  text_excerpt?: string;
+  status?: string;
+}
+
+export interface RankedDocumentItem {
+  rank: number;
+  title: string;
+  section: string;
+  cross_encoder_score: number;
+  score_percentage: string;
+  relevance_tier: string;
+  used_in_synthesis: boolean;
+  text_snippet?: string;
+  pdf_filename?: string;
+  pdf_url?: string;
+  page_number?: number;
+}
+
+export interface CitationMetrics {
+  total_citations_verified: number;
+  direct_pdf_deep_links: number;
+  statutory_provisions_covered: string[];
+  authority_level: string;
+  hallucination_risk: string;
+}
+
+export interface AccuracyMethodology {
+  dense_retrieval_formula: string;
+  sparse_retrieval_formula: string;
+  hybrid_fusion_formula: string;
+  cross_encoder_formula: string;
+  grounding_verification_rule: string;
+}
+
+export interface PipelineStageItem {
+  stage: string;
+  detail: string;
+}
+
+export interface VerificationProof {
+  accuracy_percentage: number;
+  accuracy_label: string;
+  method: string;
+  hardware_accelerator?: string;
+  pipeline_stages: PipelineStageItem[];
+  verification_anchors: VerificationAnchor[];
+  ranked_documents?: RankedDocumentItem[];
+  citation_metrics?: CitationMetrics;
+  accuracy_methodology?: AccuracyMethodology;
+  corpus_integrity?: string;
+  timing_ms?: Record<string, number>;
 }
 
 export interface QuestionData {
@@ -114,6 +177,7 @@ export interface ComparisonJurisdictionResult {
   provider_used?: string;
   abs_compliance?: ABSComplianceData;
   tkdl_pointer?: TKDLPointerData;
+  verification_proof?: VerificationProof;
   timing_ms?: {
     retrieval?: number;
     llm?: number;
@@ -149,6 +213,7 @@ export interface Message {
   abs_compliance?: ABSComplianceData;
   tkdl_pointer?: TKDLPointerData;
   case_study?: HistoricalCaseStudyData;
+  verification_proof?: VerificationProof;
   is_comparison?: boolean;
   comparison_data?: JurisdictionComparisonData;
   timestamp: string;

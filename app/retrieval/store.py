@@ -142,6 +142,9 @@ class VectorStoreManager:
             print(f"GPU: {torch.cuda.get_device_name(0)}")
         print("=" * 80)
 
+        # Initialize client and ensure collection before embedding loop
+        _ = self.client
+
         for item_idx, item in enumerate(manifest_records, start=1):
             doc_id = item["id"]
             title = item["title"]

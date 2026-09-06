@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Primary regex matching statutory Sections, Rules, Regulations, and Treaty Articles
 ARTICLE_PATTERN = re.compile(
-    r"(?im)(?:^|\n\s*)(?:ARTICLE|Article|Art\.)\s*\n*\s*(\d+[A-Za-z]?)(?:[\.\:\s—–\-]*\n*\s*([A-Z][a-zA-Z0-9\s,\-–\(\)\/]{2,80}))?"
+    r"(?im)^(?:\s*(?:ARTICLE|Article|Art\.)\s+(\d+[A-Za-z]?)(?:[\.\:\s—–\-]*\n*\s*([A-Z][^\n]{2,80}))?)"
 )
 
 SECTION_RULE_PATTERN = re.compile(
@@ -57,6 +57,26 @@ CBD_ARTICLE_MAP = {
     "Financial Resources": "20",
     "Financial Mechanism": "21",
     "Relationship with Other International": "22",
+    "Conference of the Parties": "23",
+    "Secretariat": "24",
+    "Subsidiary Body": "25",
+    "Reports": "26",
+    "Settlement of Disputes": "27",
+    "Adoption of Protocols": "28",
+    "Amendment of the Convention": "29",
+    "Adoption and Amendment of Annexes": "30",
+    "Right to Vote": "31",
+    "Relationship between this Convention": "32",
+    "Signature": "33",
+    "Ratification, Acceptance": "34",
+    "Accession": "35",
+    "Entry into Force": "36",
+    "Reservations": "37",
+    "Withdrawals": "38",
+    "Financial Interim Arrangements": "39",
+    "Secretariat Interim Arrangements": "40",
+    "Depositary": "41",
+    "Authentic Texts": "42",
 }
 
 # Nagoya Protocol Article Title Restoration Map
@@ -69,11 +89,13 @@ NAGOYA_ARTICLE_MAP = {
     "ACCESS TO GENETIC RESOURCES": "6",
     "ACCESS TO TRADITIONAL KNOWLEDGE": "7",
     "SPECIAL CONSIDERATIONS": "8",
+    "CONTRIBUTION TO CONSERVATION": "9",
     "GLOBAL MULTILATERAL BENEFIT-SHARING": "10",
     "TRANSBOUNDARY COOPERATION": "11",
-    "TRADITIONAL KNOWLEDGE ASSOCIATED WITH": "12",
+    "TRADITIONAL KNOWLEDGE ASSOCIATED": "12",
     "NATIONAL FOCAL POINTS": "13",
     "THE ACCESS AND BENEFIT-SHARING CLEARING-HOUSE": "14",
+    "COMPLIANCE WITH DOMESTIC LEGISLATION OR REGULATORY REQUIREMENTS ON ACCESS AND BENEFIT-SHARING FOR TRADITIONAL": "16",
     "COMPLIANCE WITH DOMESTIC LEGISLATION": "15",
     "MONITORING THE UTILIZATION": "17",
     "COMPLIANCE WITH MUTUALLY AGREED TERMS": "18",
@@ -88,7 +110,7 @@ NAGOYA_ARTICLE_MAP = {
     "SUBSIDIARY BODIES": "27",
     "SECRETARIAT": "28",
     "MONITORING AND REPORTING": "29",
-    "PROCEDURES AND MECHANISMS TO PROMOTE": "30",
+    "PROCEDURES AND MECHANISMS": "30",
     "ASSESSMENT AND REVIEW": "31",
     "SIGNATURE": "32",
     "ENTRY INTO FORCE": "33",
@@ -138,14 +160,29 @@ def extract_section_markers(text: str, is_treaty: bool = False, chunk_strategy: 
     # If document is an international treaty (or contains prominent Article markers), prioritize Article splitting
     if is_treaty:
         prep_text = cleaned
-        is_cbd = "biological diversity" in prep_text[:500].lower() or "convention on biological diversity" in prep_text[:1000].lower()
-        title_map = CBD_ARTICLE_MAP if is_cbd else NAGOYA_ARTICLE_MAP
-        for title_key, num in title_map.items():
-            prep_text = re.sub(
-                rf"(?im)^\s*Article\s*\n+\s*({re.escape(title_key)})",
-                rf"Article {num}. \1",
-                prep_text,
-            )
+
+        if "Table of Contents" in prep_text[:3000] or "TABLE OF CONTENTS" in prep_text[:3000]:
+            m_body = re.search(r"(?im)^(?:\s*ARTICLE\s+1\b|\s*Article\s+1\b)", prep_text[400:])
+            if m_body:
+                prep_text = prep_text[400 + m_body.start():]
+
+        is_nagoya = "nagoya" in prep_text[:1000].lower()
+        is_cbd = ("convention on biological diversity" in prep_text[:1000].lower() or "biological diversity" in prep_text[:1000].lower()) and not is_nagoya
+
+        if is_nagoya:
+            for title_key, num in NAGOYA_ARTICLE_MAP.items():
+                prep_text = re.sub(
+                    rf"(?im)\n\s*Article\s*\n+\s*({re.escape(title_key)}[^\n]*)",
+                    rf"\nArticle {num}. \1",
+                    prep_text,
+                )
+        elif is_cbd:
+            for title_key, num in CBD_ARTICLE_MAP.items():
+                prep_text = re.sub(
+                    rf"(?im)\n\s*Article\s*\n+\s*({re.escape(title_key)}[^\n]*)",
+                    rf"\nArticle {num}. \1",
+                    prep_text,
+                )
 
         art_matches = list(ARTICLE_PATTERN.finditer(prep_text))
         if art_matches:
@@ -159,7 +196,16 @@ def extract_section_markers(text: str, is_treaty: bool = False, chunk_strategy: 
 
             for idx, match in enumerate(art_matches):
                 art_num = match.group(1)
-                art_title = match.group(2) or ""
+                full_marker = match.group(0).strip()
+                m_title = re.search(r"(?:ARTICLE|Article|Art\.)\s+\d+[A-Za-z]?[\.\:\—–\-\s\n]+([A-Z][^\n]{2,80})", full_marker)
+                art_title = m_title.group(1) if m_title else ""
+                if not art_title:
+                    match_end = match.end()
+                    next_chunk = prep_text[match_end:match_end+120].strip()
+                    m_next = re.match(r"^([A-Z\s,\-–\(\)\/]{2,80})", next_chunk)
+                    if m_next:
+                        art_title = m_next.group(1).strip()
+
                 clean_title = re.sub(r"\s+", " ", art_title).strip().rstrip(".:—– ")
                 if clean_title and len(clean_title) > 60:
                     clean_title = clean_title[:57] + "..."

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { Mic } from "lucide-react";
 import { VOICE_LANGUAGES } from "../lib/constants";
 
 interface VoiceControlsProps {
@@ -37,9 +37,15 @@ export const VoiceControls: React.FC<VoiceControlsProps> = ({
         }`}
       >
         {isListening ? (
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-            <Mic className="w-4 h-4 text-rose-300" />
+          <div className="flex items-center gap-2 px-1">
+            {/* Animated Sound Wave Equalizer Bars */}
+            <div className="flex items-center gap-0.5 h-4 text-rose-300">
+              <span className="w-0.5 bg-rose-400 rounded-full wave-bar-1" />
+              <span className="w-0.5 bg-rose-400 rounded-full wave-bar-2" />
+              <span className="w-0.5 bg-rose-300 rounded-full wave-bar-3" />
+              <span className="w-0.5 bg-rose-400 rounded-full wave-bar-4" />
+            </div>
+            <Mic className="w-4 h-4 text-rose-300 animate-pulse" />
             <span className="text-[11px] font-mono text-rose-200 hidden sm:inline">Listening...</span>
           </div>
         ) : (

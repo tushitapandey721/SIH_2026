@@ -37,10 +37,8 @@ import {
 import {
   SAMPLE_PROMPTS,
   TRANSLATE_LANGUAGES,
-  VOICE_LANGUAGES,
   SPEECH_LANG_MAP,
   API_BASE_URL,
-  getCitationPdfUrl,
 } from "../lib/constants";
 import { cleanLegalTextForTTS } from "../lib/audioUtils";
 
@@ -54,6 +52,15 @@ import { VoiceControls } from "../components/VoiceControls";
 import { FeedbackDrawer } from "../components/FeedbackDrawer";
 import { CorpusProvenanceModal } from "../components/CorpusProvenanceModal";
 import { FacilitatorModal } from "../components/FacilitatorModal";
+import { VerificationProofCard } from "../components/VerificationProofCard";
+
+function generateMsgId(prefix = "msg"): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+}
+
+function getCurrentTimeString(): string {
+  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 
 export default function Home() {
   const [jurisdiction, setJurisdiction] = useState<"national" | "international">("national");
@@ -65,27 +72,63 @@ export default function Home() {
   const [formulationAnswers, setFormulationAnswers] = useState<Record<string, boolean>>({});
   const [lastQuery, setLastQuery] = useState("");
   
-  // Modals
+  // Modals initialized cleanly
   const [showFacilitatorModal, setShowFacilitatorModal] = useState(false);
-  const [showCorpusModal, setShowCorpusModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showCorpusModal, setShowCorpusModal] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("view") === "corpus";
+    }
+    return false;
+  });
+  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("view") === "history";
+    }
+    return false;
+  });
   const [selectedCitationForViewer, setSelectedCitationForViewer] = useState<Citation | null>(null);
   
   const [corpusData, setCorpusData] = useState<CorpusProvenance | null>(null);
   const [conversationsList, setConversationsList] = useState<ConversationItem[]>([]);
-  const [mySessionIds, setMySessionIds] = useState<string[]>([]);
+  const [mySessionIds, setMySessionIds] = useState<string[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("ipsakti_my_sessions");
+        return raw ? JSON.parse(raw) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
   // Voice Input (Speech-to-Text) States
-  const [isSpeechRecognitionSupported, setIsSpeechRecognitionSupported] = useState(false);
+  const [isSpeechRecognitionSupported] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const win = window as unknown as {
+        SpeechRecognition?: unknown;
+        webkitSpeechRecognition?: unknown;
+      };
+      return !!(win.SpeechRecognition || win.webkitSpeechRecognition);
+    }
+    return false;
+  });
   const [isListening, setIsListening] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState<string>("en-IN");
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const transcriptPrefixRef = useRef("");
 
   // Text-to-Speech (Read Aloud) States
-  const [isSpeechSynthesisSupported, setIsSpeechSynthesisSupported] = useState(false);
+  const [isSpeechSynthesisSupported] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return "speechSynthesis" in window;
+    }
+    return false;
+  });
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   // Translation dropdown state
@@ -109,29 +152,12 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("ipsakti_my_sessions");
-      if (raw) {
-        setMySessionIds(JSON.parse(raw));
-      }
-    } catch (e) {
-      console.warn("Could not parse local session IDs", e);
-    }
-
-    if (typeof window !== "undefined") {
-      const hasSpeechRec = !!(
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-      );
-      setIsSpeechRecognitionSupported(hasSpeechRec);
-
-      const hasSpeechSynth = "speechSynthesis" in window;
-      setIsSpeechSynthesisSupported(hasSpeechSynth);
-
-      if (hasSpeechSynth && window.speechSynthesis.onvoiceschanged !== undefined) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
         window.speechSynthesis.onvoiceschanged = () => {
           try {
             window.speechSynthesis.getVoices();
-          } catch (_) {}
+          } catch {}
         };
       }
     }
@@ -140,7 +166,7 @@ export default function Home() {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (_) {}
+        } catch {}
       }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -155,16 +181,42 @@ export default function Home() {
       const next = [id, ...prev];
       try {
         localStorage.setItem("ipsakti_my_sessions", JSON.stringify(next));
-      } catch (_) {}
+      } catch {}
       return next;
     });
   };
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  const scrollToResponseStart = (msgId?: string) => {
+    if (typeof window === "undefined") return;
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        let targetEl: HTMLElement | null = null;
+        if (msgId) {
+          targetEl = document.getElementById(`message-${msgId}`);
+        }
+        if (!targetEl) {
+          const allMsgs = document.querySelectorAll<HTMLElement>('[id^="message-"]');
+          if (allMsgs.length > 0) {
+            targetEl = allMsgs[allMsgs.length - 1];
+          }
+        }
+        if (targetEl) {
+          targetEl.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 70);
+    });
+  };
 
-  const fetchConversations = async () => {
+  // Automatically scroll to the top of new response turns on inquiry submission
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      scrollToResponseStart(lastMsg.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length, isLoading]);
+
+  const fetchConversations = React.useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/conversations`);
       if (res.ok) {
@@ -174,26 +226,27 @@ export default function Home() {
     } catch (err) {
       console.warn("Could not fetch conversations:", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
     fetch(`${API_BASE_URL}/corpus`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data) setCorpusData(data);
+        if (data && isMounted) setCorpusData(data);
       })
       .catch((err) => console.warn("Could not fetch corpus provenance:", err));
 
-    fetchConversations();
+    fetch(`${API_BASE_URL}/conversations`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && isMounted) setConversationsList(data.conversations || []);
+      })
+      .catch((err) => console.warn("Could not fetch conversations:", err));
 
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("view") === "history") {
-        setShowHistoryModal(true);
-      } else if (params.get("view") === "corpus") {
-        setShowCorpusModal(true);
-      }
-    }
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleFeedback = async (
@@ -412,14 +465,34 @@ export default function Home() {
 
   const toggleVoiceInput = () => {
     if (typeof window === "undefined") return;
-    const SpeechRec = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    interface CustomSpeechRecognition {
+      new (): {
+        continuous: boolean;
+        interimResults: boolean;
+        lang: string;
+        onstart: () => void;
+        onresult: (event: {
+          resultIndex: number;
+          results: Array<{ 0: { transcript: string }; isFinal: boolean }>;
+        }) => void;
+        onerror: (event: { error: string }) => void;
+        onend: () => void;
+        start: () => void;
+        stop: () => void;
+      };
+    }
+    const win = window as unknown as {
+      SpeechRecognition?: CustomSpeechRecognition;
+      webkitSpeechRecognition?: CustomSpeechRecognition;
+    };
+    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
     if (!SpeechRec) return;
 
     if (isListening) {
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
-        } catch (_) {}
+        } catch {}
       }
       setIsListening(false);
       return;
@@ -437,7 +510,10 @@ export default function Home() {
         setIsListening(true);
       };
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event: {
+        resultIndex: number;
+        results: Array<{ 0: { transcript: string }; isFinal: boolean }>;
+      }) => {
         let interimTranscript = "";
         let finalTranscript = "";
 
@@ -456,7 +532,7 @@ export default function Home() {
         }
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event: { error: string }) => {
         console.warn("Speech recognition error:", event.error);
         setIsListening(false);
         recognitionRef.current = null;
@@ -513,7 +589,7 @@ export default function Home() {
       if (matchingVoice) {
         utterance.voice = matchingVoice;
       }
-    } catch (_) {}
+    } catch {}
 
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
@@ -545,7 +621,7 @@ export default function Home() {
         setConversationId(data.id);
         trackMySession(data.id);
         setJurisdiction(data.jurisdiction === "international" ? "international" : "national");
-        const loadedMsgs = (data.messages || []).map((m: any) => ({
+        const loadedMsgs = (data.messages || []).map((m: Message) => ({
           ...m,
           originalContent: m.originalContent || m.content,
           activeLanguage: m.activeLanguage || "en",
@@ -554,6 +630,9 @@ export default function Home() {
         }));
         setMessages(loadedMsgs);
         setShowHistoryModal(false);
+        setTimeout(() => {
+          scrollToResponseStart();
+        }, 120);
       }
     } catch (err) {
       console.error("Failed to load conversation:", err);
@@ -572,7 +651,7 @@ export default function Home() {
           const next = prev.filter((id) => id !== convId);
           try {
             localStorage.setItem("ipsakti_my_sessions", JSON.stringify(next));
-          } catch (_) {}
+          } catch {}
           return next;
         });
         if (conversationId === convId) {
@@ -605,11 +684,11 @@ export default function Home() {
   ) => {
     if (!query || !query.trim()) {
       const errorMsg: Message = {
-        id: Date.now().toString(),
+        id: generateMsgId("err"),
         role: "assistant",
         content: "Error 400: Query cannot be empty or whitespace-only.",
         isError: true,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: getCurrentTimeString(),
       };
       setMessages((prev) => [...prev, errorMsg]);
       return;
@@ -658,25 +737,26 @@ export default function Home() {
         }
 
         const comparisonMsg: Message = {
-          id: Date.now().toString(),
+          id: generateMsgId("cmp"),
           role: "assistant",
           content: `Dual-Jurisdiction Comparative Analysis for: "${query}"`,
           is_comparison: true,
           comparison_data: cmpData,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          timestamp: getCurrentTimeString(),
         };
 
         setMessages((prev) => [...prev, comparisonMsg]);
         fetchConversations();
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsgText = err instanceof Error ? err.message : "Parallel comparison pipeline encountered an error.";
         console.error("Comparison request failed:", err);
-        setBackendError(err.message || "Parallel comparison pipeline encountered an error.");
+        setBackendError(errorMsgText);
         const errorMsg: Message = {
-          id: Date.now().toString(),
+          id: generateMsgId("err"),
           role: "assistant",
-          content: `Comparison Error: ${err.message || "Failed to execute dual jurisdiction analysis."}`,
+          content: `Comparison Error: ${errorMsgText}`,
           isError: true,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          timestamp: getCurrentTimeString(),
         };
         setMessages((prev) => [...prev, errorMsg]);
       } finally {
@@ -685,13 +765,13 @@ export default function Home() {
       return;
     }
 
-    const streamingAssistantId = (Date.now() + 1).toString();
+    const streamingAssistantId = generateMsgId("asst");
     const initialStreamingMsg: Message = {
       id: streamingAssistantId,
       role: "assistant",
       content: "",
       isStreaming: true,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: getCurrentTimeString(),
       citations: [],
     };
     setMessages((prev) => [...prev, initialStreamingMsg]);
@@ -812,6 +892,7 @@ export default function Home() {
                           abs_compliance: finalData.abs_compliance,
                           tkdl_pointer: finalData.tkdl_pointer,
                           case_study: finalData.case_study || finalData.tkdl_pointer?.case_study,
+                          verification_proof: finalData.verification_proof,
                         }
                       : m
                   )
@@ -826,7 +907,7 @@ export default function Home() {
           }
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn("Stream failed, executing synchronous fallback:", err);
       try {
         setLoadingStep("Synchronizing with legal inference fallback...");
@@ -893,15 +974,17 @@ export default function Home() {
                     abs_compliance: data.abs_compliance,
                     tkdl_pointer: data.tkdl_pointer,
                     case_study: data.case_study || data.tkdl_pointer?.case_study,
+                    verification_proof: data.verification_proof,
                   }
                 : m
             )
           );
         }
         fetchConversations();
-      } catch (fallbackErr: any) {
+      } catch (fallbackErr: unknown) {
+        const fallbackMsgText = fallbackErr instanceof Error ? fallbackErr.message : "Failed to retrieve statutory authority.";
         console.error("Full pipeline failure:", fallbackErr);
-        setBackendError(fallbackErr.message);
+        setBackendError(fallbackMsgText);
         setMessages((prev) =>
           prev.map((m) =>
             m.id === streamingAssistantId
@@ -909,7 +992,7 @@ export default function Home() {
                   ...m,
                   isStreaming: false,
                   isError: true,
-                  content: `Inference Error: ${fallbackErr.message || "Failed to retrieve statutory authority."}`,
+                  content: `Inference Error: ${fallbackMsgText}`,
                 }
               : m
           )
@@ -986,7 +1069,7 @@ export default function Home() {
     if (isListening && recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-      } catch (_) {}
+      } catch {}
       setIsListening(false);
     }
 
@@ -996,10 +1079,10 @@ export default function Home() {
     setLastQuery(trimmed);
 
     const userMsg: Message = {
-      id: Date.now().toString(),
+      id: generateMsgId("user"),
       role: "user",
       content: trimmed,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: getCurrentTimeString(),
     };
 
     const updatedHistory = [...messages, userMsg];
@@ -1009,11 +1092,31 @@ export default function Home() {
     await sendQueryToBackend(trimmed, formulationAnswers, jurisdiction, updatedHistory);
   };
 
-  const handleSamplePromptClick = (sample: SamplePrompt) => {
-    setInputQuery(sample.query);
+  const handleSamplePromptClick = async (sample: SamplePrompt) => {
+    if (isLoading) return;
+    setInputQuery("");
     setJurisdiction(sample.jurisdiction);
-    setFormulationAnswers(sample.answers);
+    setFormulationAnswers(sample.answers || {});
     setIsCompareMode(!!sample.is_compare);
+    setLastQuery(sample.query);
+
+    const userMsg: Message = {
+      id: generateMsgId("user"),
+      role: "user",
+      content: sample.query,
+      timestamp: getCurrentTimeString(),
+    };
+
+    const updatedHistory = [...messages, userMsg];
+    setMessages(updatedHistory);
+    scrollToResponseStart(userMsg.id);
+
+    await sendQueryToBackend(
+      sample.query,
+      sample.answers || {},
+      sample.jurisdiction,
+      updatedHistory
+    );
   };
 
   return (
@@ -1244,13 +1347,17 @@ export default function Home() {
 
         {/* CHAT VIEW */}
         {messages.length > 0 && (
-          <div className="space-y-6 pt-4">
+          <div className="space-y-6 pt-4 w-full max-w-full overflow-x-hidden">
             {messages.map((msg) => {
               const isUser = msg.role === "user";
 
               if (isUser) {
                 return (
-                  <div key={msg.id} className="flex justify-end gap-3 items-start pl-8">
+                  <div
+                    id={`message-${msg.id}`}
+                    key={msg.id}
+                    className="flex justify-end gap-3 items-start pl-8 scroll-top-offset scroll-mt-24"
+                  >
                     <div className="max-w-2xl bg-gradient-to-r from-amber-950/50 to-[#221c14]/90 border border-amber-500/30 text-[#f5eedb] rounded-2xl rounded-tr-none px-5 py-3.5 shadow-xl">
                       <p className="text-sm sm:text-base leading-relaxed font-light">{msg.content}</p>
                       <span className="block text-[10px] text-amber-400/60 text-right mt-1.5 font-mono">
@@ -1267,7 +1374,7 @@ export default function Home() {
               // Parallel Comparison Response View
               if (msg.is_comparison && msg.comparison_data) {
                 return (
-                  <div key={msg.id}>
+                  <div id={`message-${msg.id}`} key={msg.id} className="scroll-top-offset scroll-mt-24 w-full max-w-full">
                     <JurisdictionComparisonModal comparisonData={msg.comparison_data} />
                   </div>
                 );
@@ -1275,14 +1382,18 @@ export default function Home() {
 
               // Assistant Response
               return (
-                <div key={msg.id} className="flex justify-start gap-3 items-start pr-4 sm:pr-8">
+                <div
+                  id={`message-${msg.id}`}
+                  key={msg.id}
+                  className="flex justify-start gap-3 items-start pr-4 sm:pr-8 scroll-top-offset scroll-mt-24 w-full max-w-full"
+                >
                   <div className="w-9 h-9 rounded-xl bg-[#12100e] border border-amber-400/40 flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(234,179,8,0.15)] mt-1">
                     <Scale className="w-4 h-4 text-[#fefae0]" />
                   </div>
 
-                  <div className="flex-1 max-w-3xl space-y-3">
+                  <div className="flex-1 max-w-3xl space-y-3 min-w-0">
                     <div
-                      className={`glass-panel rounded-2xl p-5 sm:p-6 shadow-2xl ${
+                      className={`glass-panel rounded-2xl p-5 sm:p-6 shadow-2xl max-w-full ${
                         msg.isError
                           ? "border-red-500/40 bg-red-950/10"
                           : msg.abstained
@@ -1494,7 +1605,6 @@ export default function Home() {
                           </div>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             {msg.citations.map((cit, idx) => {
-                              const pdfUrl = getCitationPdfUrl(cit);
                               const officialUrl = cit.official_url;
 
                               return (
@@ -1547,6 +1657,16 @@ export default function Home() {
                         </div>
                       )}
 
+                      {/* DEDICATED ACCURACY & CORPUS VERIFICATION PROOF CARD */}
+                      {!msg.needs_classification && !msg.isError && msg.role === "assistant" && (
+                        <VerificationProofCard
+                          proof={msg.verification_proof}
+                          citations={msg.citations}
+                          timing_ms={msg.verification_proof?.timing_ms}
+                          provider_used={msg.provider_used}
+                        />
+                      )}
+
                       {/* Footer Actions & Metadata */}
                       {!msg.isStreaming && (
                         <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-stone-400 font-mono">
@@ -1587,8 +1707,15 @@ export default function Home() {
                                 >
                                   {speakingMsgId === msg.id ? (
                                     <>
-                                      <VolumeX className="w-3.5 h-3.5" />
-                                      <span>Stop Audio</span>
+                                      {/* Dynamic Audio Equalizer Wave Animation */}
+                                      <div className="flex items-center gap-0.5 h-3.5 px-0.5 text-stone-950">
+                                        <span className="w-0.5 bg-stone-950 rounded-full wave-bar-1" />
+                                        <span className="w-0.5 bg-stone-950 rounded-full wave-bar-2" />
+                                        <span className="w-0.5 bg-stone-950 rounded-full wave-bar-3" />
+                                        <span className="w-0.5 bg-stone-950 rounded-full wave-bar-4" />
+                                      </div>
+                                      <VolumeX className="w-3.5 h-3.5 ml-0.5" />
+                                      <span>Playing Audio</span>
                                     </>
                                   ) : (
                                     <>
