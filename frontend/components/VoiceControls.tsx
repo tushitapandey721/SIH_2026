@@ -21,7 +21,13 @@ export const VoiceControls: React.FC<VoiceControlsProps> = ({
   onToggleListening,
   disabled = false,
 }) => {
-  if (!isSupported) return null;
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || !isSupported) return null;
 
   return (
     <div className="flex items-center gap-1.5">

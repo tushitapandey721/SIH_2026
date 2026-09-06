@@ -74,61 +74,25 @@ export default function Home() {
   
   // Modals initialized cleanly
   const [showFacilitatorModal, setShowFacilitatorModal] = useState(false);
-  const [showCorpusModal, setShowCorpusModal] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("view") === "corpus";
-    }
-    return false;
-  });
-  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("view") === "history";
-    }
-    return false;
-  });
+  const [showCorpusModal, setShowCorpusModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedCitationForViewer, setSelectedCitationForViewer] = useState<Citation | null>(null);
   
   const [corpusData, setCorpusData] = useState<CorpusProvenance | null>(null);
   const [conversationsList, setConversationsList] = useState<ConversationItem[]>([]);
-  const [mySessionIds, setMySessionIds] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem("ipsakti_my_sessions");
-        return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
+  const [mySessionIds, setMySessionIds] = useState<string[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
 
   // Voice Input (Speech-to-Text) States
-  const [isSpeechRecognitionSupported] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      const win = window as unknown as {
-        SpeechRecognition?: unknown;
-        webkitSpeechRecognition?: unknown;
-      };
-      return !!(win.SpeechRecognition || win.webkitSpeechRecognition);
-    }
-    return false;
-  });
+  const [isSpeechRecognitionSupported, setIsSpeechRecognitionSupported] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [voiceLanguage, setVoiceLanguage] = useState<string>("en-IN");
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const transcriptPrefixRef = useRef("");
 
   // Text-to-Speech (Read Aloud) States
-  const [isSpeechSynthesisSupported] = useState<boolean>(() => {
-    if (typeof window !== "undefined") {
-      return "speechSynthesis" in window;
-    }
-    return false;
-  });
+  const [isSpeechSynthesisSupported, setIsSpeechSynthesisSupported] = useState(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
 
   // Translation dropdown state
@@ -152,7 +116,33 @@ export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // 1. Check URL parameters for direct view routing
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("view") === "corpus") setShowCorpusModal(true);
+      if (params.get("view") === "history") setShowHistoryModal(true);
+    } catch {}
+
+    // 2. Load stored session IDs from LocalStorage
+    try {
+      const raw = localStorage.getItem("ipsakti_my_sessions");
+      if (raw) setMySessionIds(JSON.parse(raw));
+    } catch {}
+
+    // 3. Detect browser Speech Recognition support
+    try {
+      const win = window as unknown as {
+        SpeechRecognition?: unknown;
+        webkitSpeechRecognition?: unknown;
+      };
+      if (win.SpeechRecognition || win.webkitSpeechRecognition) {
+        setIsSpeechRecognitionSupported(true);
+      }
+    } catch {}
+
+    // 4. Detect browser Speech Synthesis support
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      setIsSpeechSynthesisSupported(true);
       if (window.speechSynthesis.onvoiceschanged !== undefined) {
         window.speechSynthesis.onvoiceschanged = () => {
           try {
